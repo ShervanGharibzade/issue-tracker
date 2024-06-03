@@ -97,35 +97,6 @@ export default function SideBar() {
     dispatch(selectWorkSpace(id));
   }
 
-  const createTitle = (
-    <div>
-      <h2 className="text-xl font-semibold">Create Work Spaces</h2>
-    </div>
-  );
-
-  const createBody = (
-    <div className="py-2">
-      <input
-        value={nameWorkSpace.title}
-        onChange={handlerChange}
-        placeholder="Work Space Name"
-        className="block text-white/80 my-2 rounded-md p-3 bg-black/40 outline-none"
-        type="text"
-      />
-    </div>
-  );
-
-  const createActions = (
-    <div className="mx-auto w-full">
-      <button
-        onClick={handlerCreateWorkSpace}
-        className="bg-white font-semibold active:bg-black text-black rounded-md px-4 py-2 w-full"
-      >
-        Submit
-      </button>
-    </div>
-  );
-
   return (
     <>
       <motion.aside
@@ -136,8 +107,8 @@ export default function SideBar() {
           stiffness: 360,
           damping: 50,
         }}
-        style={{ height: "calc(100vh - 85px)" }}
-        className={`p-5 m-3 bg-zinc-900 rounded-md h-full shadow-2xl shadow-purple-600/60 ${
+        style={{ height: "calc(100vh - 150px)" }}
+        className={`p-5 m-3 bg-zinc-900 rounded-md h-full shadow-xl shadow-purple-600/20 ${
           openSideBar ? "w-[20px]" : "w-[300px]"
         } transition-all duration-200 relative`}
       >

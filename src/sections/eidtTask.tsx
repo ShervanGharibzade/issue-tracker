@@ -1,10 +1,68 @@
-import React from "react";
+"use client";
+
+import React, { useState } from "react";
 import CancelIcon from "@mui/icons-material/Cancel";
 import CloseIcon from "@mui/icons-material/Close";
 import { motion } from "framer-motion";
+import { useAppDispatch } from "@/redux/hooks";
+import { editTask } from "@/redux/slices/userSlice";
 
 export default function EidtTask({ task, handlerOpenEditTaskModal }: any) {
-  console.log(task, "edit");
+  const [user, setUser] = useState("");
+  const [taskInfo, setTaskInfo] = useState({
+    id: task.id,
+    description: task.description || "",
+    assignment: task.assignment || [],
+  });
+
+  const dispatch = useAppDispatch();
+
+  function handlerChange(e: any) {
+    const { value, name } = e.target;
+    setTaskInfo((prev: any) => {
+      return { ...prev, [name]: value };
+    });
+  }
+
+  function submitChanges(e: any) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      dispatch(editTask(taskInfo));
+      handlerOpenEditTaskModal();
+    }
+  }
+
+  function deleteUserFromAssignment(name: string) {
+    const arr = task.assignment;
+    const assignment = arr.filter((i: string) => i !== name);
+    dispatch(
+      editTask({
+        id: task.id,
+        description: task.description,
+        assignment: assignment,
+      })
+    );
+  }
+  console.log(task.assignment);
+
+  function addUserToAssignment(e: any) {
+    if (e.key === "Enter" && user !== "") {
+      e.preventDefault();
+      let arr = [...task.assignment];
+
+      arr.push(user);
+
+      dispatch(
+        editTask({
+          id: task.id,
+          description: task.description,
+          assignment: arr,
+        })
+      );
+
+      setUser("");
+    }
+  }
 
   return (
     <section className="fixed w-full h-full top-0 left-0 bg-black/20 z-50 flex items-center justify-center">
@@ -36,8 +94,11 @@ export default function EidtTask({ task, handlerOpenEditTaskModal }: any) {
               <div className="bg-gradient-to-r mt-3 from-purple-700 to-purple-950/0 w-full h-1 rounded-full"></div>
             </div>
             <textarea
+              name="description"
+              onChange={handlerChange}
+              onKeyDown={submitChanges}
               className="w-5/6 bg-zinc-800 rounded-md h-[150px] max-h-[150px] p-5 my-4"
-              value={task.description}
+              value={taskInfo.description}
             />
           </div>
           <div className="">
@@ -49,6 +110,7 @@ export default function EidtTask({ task, handlerOpenEditTaskModal }: any) {
               {task?.assignment.length > 0 ? (
                 task?.assignment?.map((i: any) => (
                   <span
+                    onClick={() => deleteUserFromAssignment(i)}
                     key={task.id}
                     className="bg-zinc-800 font-medium text-md p-2 rounded-md flex gap-2 w-fit items-center  "
                   >
@@ -59,6 +121,14 @@ export default function EidtTask({ task, handlerOpenEditTaskModal }: any) {
               ) : (
                 <h2>Not assigned to anyone</h2>
               )}
+              <input
+                value={user}
+                placeholder="Add user"
+                onKeyDown={addUserToAssignment}
+                onChange={(e: any) => setUser(e.target.value)}
+                type="text"
+                className="bg-zinc-800 font-medium text-md p-2 rounded-md flex gap-2 w-fit items-center min-w-[120px]"
+              />
             </p>
           </div>
         </div>

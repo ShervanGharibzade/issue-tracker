@@ -2,6 +2,7 @@
 
 import Column from "@/sections/column";
 import AddIcon from "@mui/icons-material/Add";
+import { motion } from "framer-motion";
 import { useAppDispatch, useAppSelector } from "@/redux/hooks";
 import {
   addColumn,
@@ -41,7 +42,6 @@ export default function WorkSpace() {
   const [columns, setColumns] = useState<any>(findColumns || []);
 
   const dispatch = useAppDispatch();
-  const isHaveWorkSoace = WorkSpaces.some((i) => i.id === workspaceID);
 
   useEffect(() => {
     setColumns(allColumns);
@@ -56,7 +56,7 @@ export default function WorkSpace() {
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
-      activationConstraint: { distance: 3 },
+      activationConstraint: { distance: 10 },
     }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
@@ -64,17 +64,14 @@ export default function WorkSpace() {
   );
 
   function handleDragEnd(event: DragEndEvent) {
-    console.log(1, columns);
     setActiveColumn(null);
     setActiveTask(null);
     const { active, over } = event;
-    console.log("test", event);
 
     if (!over) return;
 
     const activeColumnId = active.id;
     const overColumnId = over.id;
-    console.log(activeColumnId, overColumnId, "lokijuhy");
 
     if (activeColumnId === overColumnId) return;
 
@@ -88,11 +85,9 @@ export default function WorkSpace() {
 
       return arrayMove(columns, activeColumnIdIndex, overColumnIdIndex);
     });
-    console.log("fin");
   }
 
   function onDragStart(event: DragStartEvent) {
-    console.log(2);
     if (event.active.data.current?.type === "Column") {
       setActiveColumn(event.active.data.current.column);
     }
@@ -103,8 +98,6 @@ export default function WorkSpace() {
   }
 
   function onDragOver(event: DragOverEvent) {
-    console.log(3);
-
     const { active, over } = event;
 
     if (!over) return;
@@ -151,44 +144,55 @@ export default function WorkSpace() {
   }
 
   return (
-    <section id="section" className="p-10 w-fit flex gap-10 relative">
-      <DndContext
-        sensors={sensors}
-        onDragEnd={handleDragEnd}
-        onDragStart={onDragStart}
-        onDragOver={onDragOver}
-      >
-        {columns?.length > 0 &&
-          columns?.map(
-            (i: any) =>
-              i.workSpaceId === workspaceID && (
-                <Column column={i} key={i.id} tasks={tasks} />
-              )
-          )}
-        {createPortal(
-          <DragOverlay>
-            {activeColumn && (
-              <Column column={activeColumn} key={activeColumn?.id} />
+    <section id="section" className="p-5">
+      <div className="w-fit flex gap-10 relative">
+        <DndContext
+          sensors={sensors}
+          onDragEnd={handleDragEnd}
+          onDragStart={onDragStart}
+          onDragOver={onDragOver}
+        >
+          {columns?.length > 0 &&
+            columns?.map(
+              (i: any) =>
+                i.workSpaceId === workspaceID && (
+                  <Column column={i} key={i.id} tasks={tasks} />
+                )
             )}
-            {activeTask && <Task task={activeTask} />}
-          </DragOverlay>,
-          document.body
-        )}
-      </DndContext>
-      <button
-        onClick={handlerAddColumn}
-        className="text-center bg-white/20 hover:bg-white/30 rounded-lg w-fit h-10 py-2 px-5 flex font-semibold items-center justify-center text-black active:bg-white mx-auto gap-2 active:bg-white/50 border-2 border-purple-500 transition-all duration-200 min-w-[200px]"
-      >
-        <span className="flex items-center justify-center rounded-full">
-          <AddIcon
-            fontSize="small"
-            style={{
-              color: "white",
-            }}
-          />
-        </span>
-        <h2 className="text-white">Add Column</h2>
-      </button>
+          {createPortal(
+            <DragOverlay>
+              {activeColumn && (
+                <Column column={activeColumn} key={activeColumn?.id} />
+              )}
+              {activeTask && <Task task={activeTask} />}
+            </DragOverlay>,
+            document.body
+          )}
+        </DndContext>
+        <motion.button
+          initial={{
+            y: -300,
+          }}
+          animate={{ y: 0 }}
+          transition={{
+            duration: 0.3,
+            stiffness: 280,
+            damping: 80,
+          }}
+          onClick={handlerAddColumn}
+          className="text-center bg-zinc-800 hover:bg-white/30 rounded-lg w-fit h-10 py-2 px-5 flex font-semibold items-center justify-center text-black active:bg-white mx-auto gap-2 active:bg-white/50 border-2 border-purple-600 transition-all duration-200 min-w-[200px]"
+        >
+          <span className="flex items-center justify-center rounded-full">
+            <AddIcon
+              fontSize="small"
+              style={{
+                color: "white",
+              }}
+            />
+          </span>
+          <h2 className="text-white">Add Column</h2>
+        </motion.button>
+      </div>
     </section>
   );
 }

@@ -155,7 +155,7 @@ export default function Column({ column, tasks }: any) {
         <div
           {...attributes}
           {...listeners}
-          className="flex items-center gap-x-2 border-b-[1px] border-purple-600 pb-5 my-3"
+          className="flex items-center gap-x-2 border-b-[1px] border-purple-600 pb-5 mb-3"
         >
           {!isChangeColumnTitle ? (
             <h2

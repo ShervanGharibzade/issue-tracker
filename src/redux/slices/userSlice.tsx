@@ -50,7 +50,7 @@ interface workSpacePayload {
 interface editTask {
   description: string;
   id: any;
-  assignment: string;
+  assignment: string[];
 }
 
 interface userState {
@@ -65,7 +65,11 @@ interface userState {
 
 const initialState: userState = {
   workSpaceId: "1c1h2",
-  workSpaces: [{ id: "1c1h2", title: "chat-app", isFovrite: false }],
+  workSpaces: [
+    { id: "1c1h2", title: "chat-app", isFovrite: false },
+    { id: "1c1h3", title: "todolist", isFovrite: false },
+    { id: "1c1h4", title: "new product", isFovrite: false },
+  ],
   auth: true,
   user: {
     name: "test",
@@ -83,8 +87,84 @@ const initialState: userState = {
       title: "pending",
       id: "12",
     },
+    {
+      workSpaceId: "1c1h3",
+      title: "backLog",
+      id: "111",
+    },
+    {
+      workSpaceId: "1c1h4",
+      title: "backLog",
+      id: "1111",
+    },
+    {
+      workSpaceId: "1c1h3",
+      title: "pending",
+      id: "122",
+    },
+    {
+      workSpaceId: "1c1h3",
+      title: "finish",
+      id: "123",
+    },
   ],
   tasks: [
+    {
+      workSpaceId: "1c1h4",
+      description: "create button",
+      columnId: "1111",
+      id: uuidv4(),
+      status: "backLog" || "pending" || "finish" || "issuse",
+      assignment: ["mohamad", "shervan", "ali"],
+    },
+    {
+      workSpaceId: "1c1h4",
+      description: "create button",
+      columnId: "1111",
+      id: uuidv4(),
+      status: "backLog" || "pending" || "finish" || "issuse",
+      assignment: ["mohamad", "shervan", "ali"],
+    },
+    {
+      workSpaceId: "1c1h4",
+      description: "create button",
+      columnId: "1111",
+      id: uuidv4(),
+      status: "backLog" || "pending" || "finish" || "issuse",
+      assignment: ["mohamad", "shervan", "ali"],
+    },
+    {
+      workSpaceId: "1c1h3",
+      description: "create button",
+      columnId: "111",
+      id: uuidv4(),
+      status: "backLog" || "pending" || "finish" || "issuse",
+      assignment: ["mohamad", "shervan", "ali"],
+    },
+    {
+      workSpaceId: "1c1h3",
+      description: "create button",
+      columnId: "122",
+      id: uuidv4(),
+      status: "backLog" || "pending" || "finish" || "issuse",
+      assignment: ["mohamad", "shervan", "ali"],
+    },
+    {
+      workSpaceId: "1c1h3",
+      description: "create modal",
+      columnId: "111",
+      id: uuidv4(),
+      status: "backLog" || "pending" || "finish" || "issuse",
+      assignment: ["mohamad", "shervan", "ali"],
+    },
+    {
+      workSpaceId: "1c1h3",
+      description: "create button",
+      columnId: "122",
+      id: uuidv4(),
+      status: "backLog" || "pending" || "finish" || "issuse",
+      assignment: ["mohamad", "shervan", "ali"],
+    },
     {
       workSpaceId: "1c1h2",
       description: "create button",
@@ -233,13 +313,10 @@ const userSlice = createSlice({
       const { id, description, assignment } = action.payload;
       const newTasks = state.tasks.map((i) => {
         if (i.id === id) {
-          const haveIt = assignment ? i.assignment.includes(assignment) : true;
           return {
             ...i,
             description: description,
-            assignment: haveIt
-              ? [...i.assignment]
-              : [...i.assignment, assignment],
+            assignment: assignment,
           };
         } else {
           return i;

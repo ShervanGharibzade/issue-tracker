@@ -1,24 +1,21 @@
 "use client";
 
-import { useAppDispatch, useAppSelector } from "@/redux/hooks";
-import { changeAuth, getAuth } from "@/redux/slices/userSlice";
+import { useAppSelector } from "@/redux/hooks";
+import { getAuth, selectWorkSpaces } from "@/redux/slices/userSlice";
 import SideBar from "@/sections/sideBar";
-import LogoutIcon from "@mui/icons-material/Logout";
 import WorkSpace from "@/sections/workSpace";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Loading from "@/components/loading";
+import Header from "@/sections/header";
+import UserMenu from "@/sections/userMenu";
 
 export default function Home() {
   const [loading, setLoading] = useState(true);
   const auth = useAppSelector(getAuth);
+  const workSpacesSelected = useAppSelector(selectWorkSpaces);
 
   const router = useRouter();
-  const dispatch = useAppDispatch();
-
-  function handleLogout() {
-    dispatch(changeAuth(false));
-  }
 
   useEffect(() => {
     if (!auth) {
@@ -34,18 +31,10 @@ export default function Home() {
       <Loading />
     ) : (
       <>
-        <div className="px-4 text-xl py-2 bg-gradient-to-r from-purple-800 via-purple-950 to-purple-950/40 font-bold flex">
-          <h2 className="flex-1">Issuse | Tracker App</h2>
-          <div className="flex items-center">
-            <div className="bg-white h-8 w-8 rounded-lg"></div>
-            <h2 className="pl-2 text-base font-medium min-w-28">User Test</h2>
-            <span className="rounded-full p-1 bg-transparent active:bg-white/20 cursor-pointer">
-              <LogoutIcon onClick={handleLogout} />
-            </span>
-          </div>
-        </div>
+        <Header />
+        <UserMenu workSpacesSelected={workSpacesSelected} />
         <div
-          style={{ height: "calc(100vh - 72px)" }}
+          style={{ height: "calc(100vh - 120px)" }}
           className="flex overflow-x-auto transition-all duration-200 overflow-y-hidden"
         >
           <SideBar />
@@ -53,8 +42,6 @@ export default function Home() {
         </div>
       </>
     )
-  ) : (
-    ""
-  );
+  ) : null;
   return <main>{content}</main>;
 }
