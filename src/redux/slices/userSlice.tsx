@@ -70,7 +70,7 @@ const initialState: userState = {
     { id: "1c1h3", title: "todolist", isFovrite: false },
     { id: "1c1h4", title: "new product", isFovrite: false },
   ],
-  auth: true,
+  auth: false,
   user: {
     name: "test",
     lastName: "user",
@@ -297,8 +297,6 @@ const userSlice = createSlice({
       state.columns.push(newColumn);
     },
     deleteColumn(state, action: PayloadAction<columnPayload>) {
-      console.log(action.payload.id, "send");
-
       const newColumns = state.columns.filter(
         (i) => i.id !== action.payload.id
       );

@@ -43,7 +43,6 @@ export default function EidtTask({ task, handlerOpenEditTaskModal }: any) {
       })
     );
   }
-  console.log(task.assignment);
 
   function addUserToAssignment(e: any) {
     if (e.key === "Enter" && user !== "") {

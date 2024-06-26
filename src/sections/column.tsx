@@ -9,7 +9,6 @@ import { motion } from "framer-motion";
 
 import { useAppDispatch, useAppSelector } from "@/redux/hooks";
 import {
-  addColumn,
   addTask,
   changeNameColumn,
   deleteColumn,
@@ -104,7 +103,6 @@ export default function Column({ column, tasks }: any) {
 
   function handlerChangeColumnTitle(e: any) {
     const { value } = e.target;
-    console.log(value);
 
     setColumnTitle(value);
     dispatch(

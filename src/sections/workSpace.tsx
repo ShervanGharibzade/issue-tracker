@@ -33,8 +33,7 @@ export default function WorkSpace() {
   const workspaceID = useAppSelector(getWorkSpaceId);
   const allTasks = useAppSelector(getTasks);
   const [tasks, setTasks] = useState<any>(allTasks || []);
-  const WorkSpaces = useAppSelector(getWorkSpaces);
-  const workSpacesSelected = useAppSelector(selectWorkSpaces);
+  const workSpacesSelected = useAppSelector(getWorkSpaceId);
   const [activeColumn, setActiveColumn] = useState<any>(null);
   const [activeTask, setActiveTask] = useState<any>(null);
   const findColumns = allColumns.filter((i) => i.workSpaceId === workspaceID);
@@ -50,7 +49,7 @@ export default function WorkSpace() {
 
   function handlerAddColumn() {
     dispatch(
-      addColumn({ title: "new column", workSpaceId: workSpacesSelected[0].id })
+      addColumn({ title: "new column", workSpaceId: workSpacesSelected })
     );
   }
 

@@ -41,6 +41,12 @@ export default function Login() {
 
   return (
     <section className="flex items-center justify-center h-screen bg-zinc-950">
+      <div className="absolute right-0 top-0 p-10 text-2xl">
+        <h2>username : test</h2>
+        <p>
+          <span>password</span>:123456
+        </p>
+      </div>
       <div className="bg-zinc-900 w-fit mx-auto p-10 rounded-md border-2 border-purple-500/40">
         <form className="space-y-5">
           <h2 className="text-xl pb-5  text-purple-400">
