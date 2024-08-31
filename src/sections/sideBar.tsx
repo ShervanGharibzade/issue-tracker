@@ -145,7 +145,6 @@ export default function SideBar() {
                     damping: 50,
                   }}
                   key={i.id}
-                  onClick={() => handleSelectWorkSpace(i.id)}
                   style={{
                     borderLeft: i.id === workSpaceId ? "solid 2px #9333ea" : "",
                     background: i.id === workSpaceId ? "#3f3f3fc2" : "",
@@ -154,7 +153,12 @@ export default function SideBar() {
                 >
                   <div className="flex items-center">
                     {i.id !== nameWorkSpace.id ? (
-                      <h2 className="flex-1">{i.title}</h2>
+                      <h2
+                        className="flex-1"
+                        onClick={() => handleSelectWorkSpace(i.id)}
+                      >
+                        {i.title.toUpperCase()}
+                      </h2>
                     ) : (
                       <input
                         ref={inputBoard}
