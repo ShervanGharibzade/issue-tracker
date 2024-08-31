@@ -12,7 +12,7 @@ export default function EidtTask({ task, handlerOpenEditTaskModal }: any) {
   const [taskInfo, setTaskInfo] = useState({
     id: task.id,
     description: task.description || "",
-    assignment: task.assignment || [],
+    assignment: task.assignment || null,
   });
 
   const dispatch = useAppDispatch();
@@ -106,7 +106,7 @@ export default function EidtTask({ task, handlerOpenEditTaskModal }: any) {
               <div className="bg-gradient-to-r from-purple-700 to-purple-950/0 w-full mt-3 h-1 rounded-full"></div>
             </div>{" "}
             <p className="my-4 flex items-center gap-4 flex-wrap ">
-              {task?.assignment.length > 0 ? (
+              {task?.assignment?.length > 0 ? (
                 task?.assignment?.map((i: any) => (
                   <span
                     onClick={() => deleteUserFromAssignment(i)}
