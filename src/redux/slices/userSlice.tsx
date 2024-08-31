@@ -19,7 +19,7 @@ interface task {
   columnId: string;
   id: string;
   status: string; //TODO change status to state
-  assignment: string[];
+  assignment: string[] | null;
 }
 
 interface taskPayload {
@@ -260,7 +260,7 @@ const userSlice = createSlice({
         columnId: action.payload.columnId,
         id: uuidv4(),
         status: action.payload.status,
-        assignment: [action.payload.assignment],
+        assignment: null,
       };
 
       state.tasks.push(newTask);
