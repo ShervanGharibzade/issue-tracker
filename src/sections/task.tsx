@@ -68,6 +68,7 @@ export default function Task({ task, workId }: any) {
         {...attributes}
         {...listeners}
         key={task.id}
+        id={task.id}
         onClick={handlerOpenEditTaskModal}
         className="bg-zinc-700/50 hover:bg-zinc-700 max-w-[300px] w-[200px] grid gap-2 h-fit px-3 py-2 items-center rounded-lg transition-all duration-200"
       >

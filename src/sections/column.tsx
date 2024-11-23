@@ -35,7 +35,6 @@ export default function Column({ column, tasks }: any) {
   const [isChangeColumnTitle, setIsChangeTitleColumn] = useState(false);
 
   const tasksIds = useMemo(() => tasks?.map((i: any) => i.id), [tasks]);
-  const statusList = useAppSelector(getStatusList);
 
   useEffect(() => {
     inputColumn.current?.focus();
@@ -77,13 +76,6 @@ export default function Column({ column, tasks }: any) {
     });
     setIsAddTask(!isAddTask);
   }
-
-  // function handlerChange(e: any) {
-  //   const { value, name } = e.target;
-  //   setTaskInfo((prev) => {
-  //     return { ...prev, [name]: value, workSpaceId: column.workSpaceId };
-  //   });
-  // }
 
   function handlerCreateNewTask() {
     dispatch(addTask(taskInfo));
