@@ -1,25 +1,39 @@
-import React from "react";
+"use client";
+
+import DashboardIcon from "@mui/icons-material/Dashboard";
 import LogoutIcon from "@mui/icons-material/Logout";
+import Avatar from "@/components/Avatar";
 import { useAppDispatch, useAppSelector } from "@/redux/hooks";
-import { changeAuth, getAuth } from "@/redux/slices/userSlice";
+import { selectUser, signOut } from "@/redux/slices/userSlice";
+
+function capitalize(value: string) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
 
 export default function Header() {
-  const auth = useAppSelector(getAuth);
   const dispatch = useAppDispatch();
+  const user = useAppSelector(selectUser);
+  const fullName = `${capitalize(user.name)} ${capitalize(user.lastName)}`;
 
-  function handleLogout() {
-    dispatch(changeAuth(false));
-  }
   return (
-    <div className="px-4 text-xl py-2 bg-gradient-to-r from-purple-800 via-purple-950 to-purple-950/40 font-bold flex">
-      <h2 className="flex-1">Issuse | Tracker App</h2>
-      <div className="flex items-center">
-        <div className="bg-white h-8 w-8 rounded-lg"></div>
-        <h2 className="pl-2 text-base font-medium min-w-28">User Test</h2>
-        <span className="rounded-full p-1 bg-transparent active:bg-white/20 cursor-pointer">
-          <LogoutIcon onClick={handleLogout} />
-        </span>
+    <header className="flex items-center gap-3 border-b border-purple-900/60 bg-gradient-to-r from-purple-900 via-purple-950 to-zinc-950 px-4 py-2">
+      <DashboardIcon className="text-purple-300" />
+      <p className="flex-1 truncate text-lg font-bold tracking-tight">
+        Issue Tracker
+      </p>
+      <div className="flex items-center gap-2">
+        <Avatar name={fullName} />
+        <span className="hidden text-sm font-medium sm:block">{fullName}</span>
+        <button
+          type="button"
+          onClick={() => dispatch(signOut())}
+          className="icon-btn"
+          aria-label="Log out"
+          title="Log out"
+        >
+          <LogoutIcon fontSize="small" />
+        </button>
       </div>
-    </div>
+    </header>
   );
 }

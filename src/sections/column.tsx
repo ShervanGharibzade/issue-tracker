@@ -1,235 +1,251 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import MoreHorizIcon from "@mui/icons-material/MoreHoriz";
+import { memo, useEffect, useRef, useState } from "react";
 import AddIcon from "@mui/icons-material/Add";
-import CheckCircleIcon from "@mui/icons-material/CheckCircle";
-import CancelIcon from "@mui/icons-material/Cancel";
-import { motion } from "framer-motion";
-
-import { useAppDispatch, useAppSelector } from "@/redux/hooks";
-import {
-  addTask,
-  changeNameColumn,
-  deleteColumn,
-  getStatusList,
-} from "@/redux/slices/userSlice";
-import Options from "@/components/options";
-import { CSS } from "@dnd-kit/utilities";
+import CloseIcon from "@mui/icons-material/Close";
 import DeleteIcon from "@mui/icons-material/Delete";
-import Task from "@/sections/task";
-import { SortableContext, useSortable } from "@dnd-kit/sortable";
+import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
+import EditIcon from "@mui/icons-material/Edit";
+import { motion } from "framer-motion";
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import Button from "@/components/Button";
+import ConfirmDialog from "@/components/ConfirmDialog";
+import InlineInput from "@/components/InlineInput";
+import Menu from "@/components/Menu";
+import { useAppDispatch } from "@/redux/hooks";
+import { addTask, deleteColumn, renameColumn } from "@/redux/slices/userSlice";
+import Task from "./task";
+import type { Column as ColumnType, Task as TaskType } from "@/types";
 
-export default function Column({ column, tasks }: any) {
-  const [taskInfo, setTaskInfo] = useState({
-    description: "",
-    workSpaceId: "",
-    columnId: "",
-    assignment: "",
-    id: "",
-    status: "backLog",
-  });
-  const [taskVlaue, setTaskValue] = useState("");
-  const inputTask = useRef<any>(null);
-  const [columnTitle, setColumnTitle] = useState<string>(column.title);
-  const [isChangeColumnTitle, setIsChangeTitleColumn] = useState(false);
+interface ColumnProps {
+  column: ColumnType;
+  /** Tasks currently visible (after the search filter). */
+  tasks: TaskType[];
+  /** Number of tasks in the column regardless of the filter. */
+  totalCount: number;
+  isFiltering: boolean;
+}
 
-  const tasksIds = useMemo(() => tasks?.map((i: any) => i.id), [tasks]);
-
-  useEffect(() => {
-    inputColumn.current?.focus();
-  }, [isChangeColumnTitle]);
+function Column({ column, tasks, totalCount, isFiltering }: ColumnProps) {
+  const dispatch = useAppDispatch();
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+  const [isComposing, setIsComposing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const listRef = useRef<HTMLDivElement>(null);
 
   const {
     setNodeRef,
+    setActivatorNodeRef,
     attributes,
     listeners,
     transform,
     transition,
     isDragging,
-  } = useSortable({
-    id: column.id,
-    data: { type: "Column", column },
-  });
-  const inputColumn = useRef<any>(null);
-  const style = {
-    transition,
-    transform: CSS.Transform.toString(transform),
-  };
+  } = useSortable({ id: column.id, data: { type: "Column" } });
 
-  const dispatch = useAppDispatch();
+  // Keep the newest task in view while adding several in a row.
+  useEffect(() => {
+    if (isComposing) {
+      listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
+    }
+  }, [tasks.length, isComposing]);
 
-  const [isAddTask, setIsAddTask] = useState(false);
-  const [openOptions, setOpenOptions] = useState(false);
-
-  const options = [
-    { name: "Delete column", func: handlerDeleteColumn, icon: <DeleteIcon /> },
-  ];
-
-  function handlerCloseModal() {
-    setTaskInfo((prev) => {
-      return {
-        ...prev,
+  function submitTask() {
+    const description = draft.trim();
+    if (!description) return;
+    dispatch(
+      addTask({
+        workSpaceId: column.workSpaceId,
         columnId: column.id,
-        workSpaceId: column.workSpaceId,
-      };
-    });
-    setIsAddTask(!isAddTask);
-  }
-
-  function handlerCreateNewTask() {
-    dispatch(addTask(taskInfo));
-    handlerCloseModal();
-  }
-
-  function handlerDeleteColumn() {
-    dispatch(
-      deleteColumn({ workSpaceId: "1c1h2", title: column.title, id: column.id })
-    );
-    handlerOpenOptions();
-  }
-
-  function handlerIsChangeColumnTitle() {
-    setIsChangeTitleColumn(!isChangeColumnTitle);
-  }
-
-  function handlerChangeColumnTitle(e: any) {
-    const { value } = e.target;
-
-    setColumnTitle(value);
-    dispatch(
-      changeNameColumn({
-        workSpaceId: column.workSpaceId,
-        title: value,
-        id: column.id,
+        description,
       })
     );
+    setDraft("");
   }
 
-  function handlerKeyEnter(e: any) {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      dispatch(
-        changeNameColumn({
-          workSpaceId: "1c1h2",
-          title: columnTitle,
-          id: column.id,
-        })
-      );
-      setIsChangeTitleColumn(false);
-    }
-  }
-
-  function handlerOpenOptions() {
-    setOpenOptions(!openOptions);
-  }
-
-  if (isDragging) {
-    return (
-      <div className="bg-white/10 opacity-35 w-[275px] rounded-lg p-3 relative h-full border-[1px] border-white/30"></div>
-    );
+  function closeComposer() {
+    setIsComposing(false);
+    setDraft("");
   }
 
   return (
-    <div ref={setNodeRef} style={style} key={column.id}>
-      <motion.div
-        initial={{ scale: 0, rotate: 90 }}
-        animate={{ rotate: 0, scale: 1 }}
-        transition={{
-          duration: 0.3,
-          stiffness: 260,
-          damping: 20,
-        }}
-        className="min-w-[250px] bg-zinc-900 shadow-2xl shadow-purple-900/60 rounded-xl p-5 h-fit relative transition-all duration-150 max-w-[300px]"
+    <>
+      <div
+        ref={setNodeRef}
+        style={{ transform: CSS.Transform.toString(transform), transition }}
+        className={`flex max-h-full w-72 shrink-0 ${isDragging ? "opacity-30" : ""}`}
       >
-        <div
-          {...attributes}
-          {...listeners}
-          className="flex items-center gap-x-2 border-b-[1px] border-purple-600 pb-5 mb-3"
+        <motion.section
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          aria-label={`Column ${column.title}`}
+          className="flex max-h-full w-full flex-col rounded-xl border border-zinc-800 bg-zinc-900 shadow-lg shadow-purple-950/30"
         >
-          {!isChangeColumnTitle ? (
-            <h2
-              onClick={handlerIsChangeColumnTitle}
-              className="text-lg text-white text-center font-semibold flex-1 cursor-pointer"
+          <header className="flex items-center gap-1 border-b border-zinc-800 p-2">
+            <button
+              ref={setActivatorNodeRef}
+              {...attributes}
+              {...listeners}
+              type="button"
+              aria-label={`Reorder column ${column.title}`}
+              className="icon-btn cursor-grab touch-none active:cursor-grabbing"
             >
-              {columnTitle ? columnTitle : "not name"}
-            </h2>
-          ) : (
-            <input
-              onChange={handlerChangeColumnTitle}
-              onKeyDown={handlerKeyEnter}
-              value={columnTitle}
-              type="text"
-              className="bg-black/40 text-white rounded-md py-2 px-3 max-w-[150px]"
-            />
-          )}
-          <span
-            onClick={handlerOpenOptions}
-            className="rounded-full cursor-pointer px-0.5 active:bg-white/50"
-          >
-            <MoreHorizIcon />
-          </span>
-        </div>
-        <div className="grid gap-5 pt-5 px-2 justify-center w-[250px] max-h-[500px] overflow-y-auto overflow-x-hidden max-w-[300px]">
-          {tasks?.map(
-            (i: any) =>
-              i.columnId === column.id &&
-              i.workSpaceId === column.workSpaceId && (
-                <SortableContext items={tasksIds} key={i.id}>
-                  <Task task={i} workId={column.workSpaceId} />
-                </SortableContext>
-              )
-          )}
-          {isAddTask && (
-            <p className="flex gap-3 items-center justify-between break-words">
-              <input
-                value={taskVlaue}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    handlerCreateNewTask();
-                    setTaskValue("");
-                  }
+              <DragIndicatorIcon fontSize="small" />
+            </button>
+
+            {isRenaming ? (
+              <InlineInput
+                initialValue={column.title}
+                ariaLabel="Column name"
+                className="min-w-0 flex-1"
+                onCommit={(title) => {
+                  dispatch(renameColumn({ id: column.id, title }));
+                  setIsRenaming(false);
                 }}
-                ref={inputTask}
-                onChange={(e) => {
-                  setTaskValue(e.target.value);
-                  setTaskInfo((prev) => {
-                    return { ...prev, description: e.target.value };
-                  });
-                }}
-                className="flex-1 bg-zinc-800 border-l-2 border-purple-500 p-2 rounded-r-md outline-none w-5/6"
+                onCancel={() => setIsRenaming(false)}
               />
-              {taskVlaue ? (
-                <span onClick={handlerCreateNewTask}>
-                  <CheckCircleIcon />
-                </span>
-              ) : (
-                <span
-                  onClick={() => setIsAddTask(false)}
-                  className="cursor-pointer"
+            ) : (
+              <h2 className="min-w-0 flex-1">
+                <button
+                  type="button"
+                  onClick={() => setIsRenaming(true)}
+                  title="Click to rename"
+                  className="w-full truncate rounded px-1 py-1 text-left font-semibold text-white transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
                 >
-                  <CancelIcon />
-                </span>
-              )}
-            </p>
-          )}
-          <button
-            onClick={handlerCloseModal}
-            className="text-center bg-purple-500 rounded-lg w-fit h-10 p-2 flex font-semibold items-center justify-center text-black active:bg-white my-5 mx-auto gap-2 active:bg-white/50 transition-all duration-200"
-          >
-            <span className="flex items-center justify-center rounded-full bg-purple-300">
-              <AddIcon
-                fontSize="small"
-                style={{
-                  color: "black",
-                }}
-              />
+                  {column.title}
+                </button>
+              </h2>
+            )}
+
+            <span
+              className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs font-medium tabular-nums text-zinc-300"
+              aria-label={`${totalCount} tasks`}
+            >
+              {isFiltering ? `${tasks.length}/${totalCount}` : totalCount}
             </span>
-            <h2>Add Task</h2>
-          </button>
-          <Options show={openOptions} items={options} />
-        </div>
-      </motion.div>
-    </div>
+
+            <Menu
+              label={`Options for column ${column.title}`}
+              items={[
+                {
+                  label: "Rename column",
+                  icon: <EditIcon fontSize="small" />,
+                  onSelect: () => setIsRenaming(true),
+                },
+                {
+                  label: "Delete column",
+                  icon: <DeleteIcon fontSize="small" />,
+                  danger: true,
+                  onSelect: () => setIsConfirmingDelete(true),
+                },
+              ]}
+            />
+          </header>
+
+          <div
+            ref={listRef}
+            className="min-h-16 flex-1 space-y-2 overflow-y-auto p-2"
+          >
+            <SortableContext
+              items={tasks.map((task) => task.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              {tasks.map((task) => (
+                <Task key={task.id} task={task} />
+              ))}
+            </SortableContext>
+            {tasks.length === 0 && !isComposing && (
+              <p className="rounded-lg border border-dashed border-zinc-700 px-3 py-4 text-center text-xs text-zinc-500">
+                {isFiltering && totalCount > 0
+                  ? "No matching tasks"
+                  : "No tasks yet. Add one or drop a task here."}
+              </p>
+            )}
+          </div>
+
+          <footer className="border-t border-zinc-800 p-2">
+            {isComposing ? (
+              <div className="space-y-2">
+                <textarea
+                  autoFocus
+                  rows={2}
+                  maxLength={280}
+                  value={draft}
+                  aria-label={`New task in ${column.title}`}
+                  placeholder="What needs to be done?"
+                  onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      submitTask();
+                    } else if (event.key === "Escape") {
+                      closeComposer();
+                    }
+                  }}
+                  className="field resize-none"
+                />
+                <div className="flex items-center gap-2">
+                  <Button
+                    onClick={submitTask}
+                    disabled={!draft.trim()}
+                    className="px-3 py-1.5"
+                  >
+                    Add task
+                  </Button>
+                  <button
+                    type="button"
+                    onClick={closeComposer}
+                    className="icon-btn"
+                    aria-label="Cancel adding task"
+                  >
+                    <CloseIcon fontSize="small" />
+                  </button>
+                  <span className="ml-auto text-xs text-zinc-500">
+                    Enter to add
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIsComposing(true)}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium text-zinc-300 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
+              >
+                <AddIcon fontSize="small" />
+                Add task
+              </button>
+            )}
+          </footer>
+        </motion.section>
+      </div>
+
+      <ConfirmDialog
+        open={isConfirmingDelete}
+        title={`Delete "${column.title}"?`}
+        message={
+          totalCount > 0
+            ? `This column and its ${totalCount} ${
+                totalCount === 1 ? "task" : "tasks"
+              } will be permanently removed.`
+            : "This empty column will be removed."
+        }
+        confirmLabel="Delete column"
+        destructive
+        onCancel={() => setIsConfirmingDelete(false)}
+        onConfirm={() => {
+          setIsConfirmingDelete(false);
+          dispatch(deleteColumn(column.id));
+        }}
+      />
+    </>
   );
 }
+
+export default memo(Column);

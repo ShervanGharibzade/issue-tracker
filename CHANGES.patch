@@ -1,0 +1,4311 @@
+diff --git a/README.md b/README.md
+index c403366..02d6bd5 100644
+--- a/README.md
++++ b/README.md
+@@ -1,36 +1,37 @@
+-This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
++# Issue Tracker
+ 
+-## Getting Started
++A drag-and-drop kanban board for tracking issues across several boards.
++Built with Next.js 14 (App Router), Redux Toolkit, dnd-kit, Tailwind CSS and framer-motion.
+ 
+-First, run the development server:
++## Getting started
+ 
+ ```bash
+-npm run dev
+-# or
+-yarn dev
+-# or
+-pnpm dev
+-# or
+-bun dev
++npm install
++npm run dev        # http://localhost:3000
++npm run typecheck  # tsc --noEmit
++npm run lint
++npm run build
+ ```
+ 
+-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
++Demo login: `test` / `123456` (there is no backend; credentials are checked locally).
+ 
+-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
++## Features
+ 
+-This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
++- Multiple boards: create, rename, favourite (pinned to the top) and delete
++- Columns: add, rename (click the title), reorder by dragging the grip, delete
++- Tasks: add (Enter), edit in a dialog, assign people, delete, drag between columns
++- Search across task text and assignees
++- Everything is saved to `localStorage`, including the signed-in state
++- Keyboard accessible drag & drop, dialogs with focus trapping, reduced-motion support
+ 
+-## Learn More
++## Project structure
+ 
+-To learn more about Next.js, take a look at the following resources:
+-
+-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
+-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+-
+-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js/) - your feedback and contributions are welcome!
+-
+-## Deploy on Vercel
+-
+-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+-
+-Check out our [Next.js deployment documentation](https://nextjs.org/docs/deployment) for more details.
++```
++src/
++  app/            routes (board page, login) and global styles
++  components/     generic UI: Button, Modal, ConfirmDialog, Menu, Avatar, InlineInput, Loading
++  sections/       feature UI: header, sideBar, boardToolbar, workSpace (DnD), column, task, taskCard, editTask, addColumn
++  redux/          store factory, typed hooks, persistence, userSlice (state, reducers, selectors)
++  types/          shared domain types
++  utils/          avatar helpers
++```
+diff --git a/REFACTOR_NOTES.md b/REFACTOR_NOTES.md
+new file mode 100644
+index 0000000..df380f4
+--- /dev/null
++++ b/REFACTOR_NOTES.md
+@@ -0,0 +1,26 @@
++# Refactor notes
++
++## Logic bugs fixed
++- Drag & drop never reached Redux: moved tasks / reordered columns snapped back on the next render. Now `moveTask` / `reorderColumns` reducers own the order, and Escape cancels a drag and restores the snapshot.
++- Column reorder used columns from *all* boards; task `SortableContext` was created once per task. Both fixed (one context per column, one for columns).
++- Hardcoded workspace id `"1c1h2"` in delete/rename column removed.
++- Column rename dispatched on every keystroke; now commits on Enter/blur, cancels on Escape, rejects empty names.
++- The top menu always showed the *first* board's title (and crashed with zero boards). It now shows the active board and handles the empty state.
++- Deleting a board left its columns/tasks behind and kept it selected. Now cascades and selects another board.
++- Edit-task modal: duplicate React keys, stale `task.assignment` reads, edit/delete icon clicks also opening the modal, saving only on Enter. Rewritten as a draft form with Save/Cancel.
++- Login/auth state was lost on refresh and the password field started as plain text. Auth and data persist; password is masked with a toggle; errors are shown.
++- Invalid HTML (`<h2>`/`<div>` inside `<p>`), missing keys, unused `Modal` import of `domain`, barrel icon import.
++- Fake 3-second loading timer removed (it also leaked). The app waits only for storage hydration.
++- Typos fixed across names and UI (`isFovrite`, `eidtTask`, "Issuse", "Dengers", "analize").
++
++## UI / UX
++- Consistent design tokens (`.icon-btn`, `.field`, `Button` variants), visible focus rings, responsive layout (`h-dvh`, collapsible sidebar, auto-collapsed on mobile).
++- Inline composers for tasks / columns / boards instead of creating "new column" placeholders; new boards get To do / In progress / Done.
++- Confirmation dialogs for destructive actions; empty states; task counts; search with per-column match counts.
++- Dead navigation tabs ("My Tasks", "analize", "Dengers", "My Boards") removed: they did nothing. Replaced by a toolbar with the board title, stats and search.
++- Accessible dialogs (focus trap, Escape, restore focus), menus (arrow keys), aria labels, `prefers-reduced-motion`.
++
++## Notes
++- I could not run `npm install` in my sandbox (no registry access), so the code was not compiled here. Please run `npm install && npm run typecheck && npm run build` once. 
++- `package.json` dependencies are untouched so `package-lock.json` stays valid. Optional cleanup: `npm i @dnd-kit/utilities` (imported directly, currently only a transitive dependency) and `npm rm uuid @types/uuid` (no longer used).
++- Saved data uses a new storage key/version, so old state is simply ignored.
+diff --git a/package.json b/package.json
+index 4bc68f4..6fe9f5a 100644
+--- a/package.json
++++ b/package.json
+@@ -6,7 +6,8 @@
+     "dev": "next dev",
+     "build": "next build",
+     "start": "next start",
+-    "lint": "next lint"
++    "lint": "next lint",
++    "typecheck": "tsc --noEmit"
+   },
+   "dependencies": {
+     "@dnd-kit/core": "^6.1.0",
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 8716860..43ed568 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -3,47 +3,49 @@
+ @tailwind utilities;
+ 
+ :root {
+-  --foreground-rgb: 0, 0, 0;
+-  --background-start-rgb: 214, 219, 220;
+-  --background-end-rgb: 255, 255, 255;
+-}
+-
+-@media (prefers-color-scheme: dark) {
+-  :root {
+-    --foreground-rgb: 255, 255, 255;
+-    --background-start-rgb: 0, 0, 0;
+-    --background-end-rgb: 0, 0, 0;
+-  }
++  color-scheme: dark;
+ }
+ 
++html,
+ body {
+-  color: rgb(var(--foreground-rgb));
+-  background: black;
++  min-height: 100%;
++  background: #09090b;
+ }
+ 
+-@layer utilities {
+-  .text-balance {
+-    text-wrap: balance;
+-  }
++/* Scrollbars */
++* {
++  scrollbar-width: thin;
++  scrollbar-color: #52525b transparent;
+ }
+-
+-/* width */
+ ::-webkit-scrollbar {
+-  width: 6px;
+-  border-radius: 100%;
++  width: 8px;
++  height: 8px;
+ }
+-
+-/* Track */
+ ::-webkit-scrollbar-track {
+-  background: #0f0f0f;
++  background: transparent;
+ }
+-
+-/* Handle */
+ ::-webkit-scrollbar-thumb {
+-  background: #888;
++  background: #52525b;
++  border-radius: 9999px;
+ }
+-
+-/* Handle on hover */
+ ::-webkit-scrollbar-thumb:hover {
+-  background: #555;
++  background: #71717a;
++}
++
++@layer components {
++  /* Square icon-only button used across the app. */
++  .icon-btn {
++    @apply inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 disabled:opacity-50;
++  }
++
++  /* Text input / textarea. */
++  .field {
++    @apply w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 transition-colors placeholder:text-zinc-500 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500/40 aria-[invalid=true]:border-red-500;
++  }
++}
++
++@layer utilities {
++  .text-balance {
++    text-wrap: balance;
++  }
+ }
+diff --git a/src/app/layout.tsx b/src/app/layout.tsx
+index 26ae87f..8c0c7cc 100644
+--- a/src/app/layout.tsx
++++ b/src/app/layout.tsx
+@@ -1,20 +1,27 @@
+-import type { Metadata } from "next";
++import type { Metadata, Viewport } from "next";
++import { Inter } from "next/font/google";
+ import "./globals.css";
+ import Providers from "@/redux/Providers";
+ 
++const inter = Inter({ subsets: ["latin"], display: "swap" });
++
+ export const metadata: Metadata = {
+-  title: "Issue Tracker",
+-  description: "Generated by create next app",
++  title: { default: "Issue Tracker", template: "%s | Issue Tracker" },
++  description:
++    "A drag-and-drop kanban board for tracking issues across multiple projects.",
++};
++
++export const viewport: Viewport = {
++  themeColor: "#09090b",
++  colorScheme: "dark",
+ };
+ 
+ export default function RootLayout({
+   children,
+-}: Readonly<{
+-  children: React.ReactNode;
+-}>) {
++}: Readonly<{ children: React.ReactNode }>) {
+   return (
+     <html lang="en">
+-      <body className="">
++      <body className={`${inter.className} bg-zinc-950 text-zinc-100 antialiased`}>
+         <Providers>{children}</Providers>
+       </body>
+     </html>
+diff --git a/src/app/login/page.tsx b/src/app/login/page.tsx
+index 773a3df..a20f8d9 100644
+--- a/src/app/login/page.tsx
++++ b/src/app/login/page.tsx
+@@ -1,87 +1,145 @@
+ "use client";
+ 
+-import React from "react";
+-import { useState } from "react";
+-import RemoveRedEyeIcon from "@mui/icons-material/RemoveRedEye";
+-import Button from "@/components/Button";
++import { useEffect, useId, useState } from "react";
+ import { useRouter } from "next/navigation";
+-import { useAppDispatch } from "@/redux/hooks";
+-import { changeAuth } from "@/redux/slices/userSlice";
++import VisibilityIcon from "@mui/icons-material/Visibility";
++import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
++import Button from "@/components/Button";
++import Loading from "@/components/loading";
++import { useAppDispatch, useAppSelector } from "@/redux/hooks";
++import { selectAuth, selectHydrated, signIn } from "@/redux/slices/userSlice";
+ 
+-export default function Login() {
+-  const [user, setUser] = useState({
+-    username: "",
+-    password: "",
+-  });
++// Demo-only credentials: there is no backend in this project.
++const DEMO_USERNAME = "test";
++const DEMO_PASSWORD = "123456";
+ 
+-  const dispatch = useAppDispatch();
++export default function Login() {
+   const router = useRouter();
++  const dispatch = useAppDispatch();
++  const hydrated = useAppSelector(selectHydrated);
++  const auth = useAppSelector(selectAuth);
+ 
+-  const [type, setType] = useState("text");
+-
+-  function handlerChangeType() {
+-    setType(type === "text" ? "password" : "text");
+-  }
++  const id = useId();
++  const [username, setUsername] = useState("");
++  const [password, setPassword] = useState("");
++  const [showPassword, setShowPassword] = useState(false);
++  const [error, setError] = useState("");
+ 
+-  function handlerChnage(e: any) {
+-    const { name, value } = e.target;
++  useEffect(() => {
++    if (hydrated && auth) router.replace("/");
++  }, [hydrated, auth, router]);
+ 
+-    setUser((prev: any) => {
+-      return { ...prev, [name]: value };
+-    });
++  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
++    event.preventDefault();
++    if (!username.trim() || !password) {
++      setError("Enter your username and password.");
++      return;
++    }
++    if (username.trim() !== DEMO_USERNAME || password !== DEMO_PASSWORD) {
++      setError("Incorrect username or password.");
++      return;
++    }
++    setError("");
++    dispatch(signIn());
+   }
+ 
+-  function handlerSubmit(e: any) {
+-    e.preventDefault();
+-    if (user.password === "123456" && user.username === "test") {
+-      dispatch(changeAuth(true));
+-      router.push("/");
+-    }
++  function fillDemo() {
++    setUsername(DEMO_USERNAME);
++    setPassword(DEMO_PASSWORD);
++    setError("");
+   }
+ 
++  // Avoid flashing the form for someone who is already signed in.
++  if (!hydrated || auth) return <Loading />;
++
+   return (
+-    <section className="flex items-center justify-center h-screen bg-zinc-950">
+-      <div className="absolute right-0 top-0 p-10 text-2xl">
+-        <h2>username : test</h2>
+-        <p>
+-          <span>password</span>:123456
+-        </p>
+-      </div>
+-      <div className="bg-zinc-900 w-fit mx-auto p-10 rounded-md border-2 border-purple-500/40">
+-        <form className="space-y-5">
+-          <h2 className="text-xl pb-5  text-purple-400">
+-            Login in |{" "}
+-            <span className="font-bold text-white">Issue Tracker</span>
+-          </h2>
+-          <div className="space-y-3">
+-            <label htmlFor="">Username</label>
++    <main className="flex min-h-dvh items-center justify-center bg-zinc-950 p-4">
++      <div className="w-full max-w-sm space-y-4">
++        <form
++          onSubmit={handleSubmit}
++          noValidate
++          className="space-y-5 rounded-xl border border-purple-500/30 bg-zinc-900 p-8 shadow-2xl shadow-purple-900/20"
++        >
++          <h1 className="text-2xl font-bold">
++            <span className="text-purple-400">Log in to</span> Issue Tracker
++          </h1>
++
++          <div className="space-y-2">
++            <label htmlFor={`${id}-username`} className="text-sm font-medium">
++              Username
++            </label>
+             <input
++              id={`${id}-username`}
+               name="username"
+-              onChange={handlerChnage}
+-              className="block p-2 text-white bg-zinc-700 rounded-md outline-none w-full"
+               type="text"
++              autoComplete="username"
++              autoFocus
++              value={username}
++              onChange={(event) => setUsername(event.target.value)}
++              aria-invalid={Boolean(error)}
++              aria-describedby={error ? `${id}-error` : undefined}
++              className="field"
+             />
+           </div>
+-          <div className="space-y-3">
+-            <label htmlFor="" className="block">
++
++          <div className="space-y-2">
++            <label htmlFor={`${id}-password`} className="text-sm font-medium">
+               Password
+             </label>
+-            <div className="flex gap-5 items-center">
++            <div className="relative">
+               <input
+-                onChange={handlerChnage}
++                id={`${id}-password`}
+                 name="password"
+-                className="p-2 text-white bg-zinc-700 rounded-md outline-none"
+-                type={type}
+-              />
+-              <RemoveRedEyeIcon
+-                onClick={handlerChangeType}
+-                sx={{ cursor: "pointer" }}
++                type={showPassword ? "text" : "password"}
++                autoComplete="current-password"
++                value={password}
++                onChange={(event) => setPassword(event.target.value)}
++                aria-invalid={Boolean(error)}
++                aria-describedby={error ? `${id}-error` : undefined}
++                className="field pr-11"
+               />
++              <button
++                type="button"
++                onClick={() => setShowPassword((value) => !value)}
++                aria-label={showPassword ? "Hide password" : "Show password"}
++                aria-pressed={showPassword}
++                className="icon-btn absolute right-1 top-1/2 -translate-y-1/2"
++              >
++                {showPassword ? (
++                  <VisibilityOffIcon fontSize="small" />
++                ) : (
++                  <VisibilityIcon fontSize="small" />
++                )}
++              </button>
+             </div>
+           </div>
+-          <Button onClick={handlerSubmit} title={"Submit"} />
++
++          {error && (
++            <p
++              id={`${id}-error`}
++              role="alert"
++              className="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-300"
++            >
++              {error}
++            </p>
++          )}
++
++          <Button type="submit" fullWidth className="py-2.5 text-base">
++            Log in
++          </Button>
+         </form>
++
++        <div className="flex items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-900/60 px-4 py-3 text-sm text-zinc-400">
++          <p>
++            Demo account:{" "}
++            <code className="text-zinc-200">{DEMO_USERNAME}</code> /{" "}
++            <code className="text-zinc-200">{DEMO_PASSWORD}</code>
++          </p>
++          <Button variant="ghost" onClick={fillDemo} className="px-3 py-1">
++            Fill in
++          </Button>
++        </div>
+       </div>
+-    </section>
++    </main>
+   );
+ }
+diff --git a/src/app/page.tsx b/src/app/page.tsx
+index 1aa0935..d83c5e8 100644
+--- a/src/app/page.tsx
++++ b/src/app/page.tsx
+@@ -1,47 +1,37 @@
+ "use client";
+ 
+-import { useAppSelector } from "@/redux/hooks";
+-import { getAuth, selectWorkSpaces } from "@/redux/slices/userSlice";
+-import SideBar from "@/sections/sideBar";
+-import WorkSpace from "@/sections/workSpace";
++import { useEffect } from "react";
+ import { useRouter } from "next/navigation";
+-import { useEffect, useState } from "react";
+ import Loading from "@/components/loading";
++import { useAppSelector } from "@/redux/hooks";
++import { selectAuth, selectHydrated } from "@/redux/slices/userSlice";
++import BoardToolbar from "@/sections/boardToolbar";
+ import Header from "@/sections/header";
+-import UserMenu from "@/sections/userMenu";
++import SideBar from "@/sections/sideBar";
++import WorkSpace from "@/sections/workSpace";
+ 
+ export default function Home() {
+-  const [loading, setLoading] = useState(true);
+-  const auth = useAppSelector(getAuth);
+-  const workSpacesSelected = useAppSelector(selectWorkSpaces);
+-
+   const router = useRouter();
++  const hydrated = useAppSelector(selectHydrated);
++  const auth = useAppSelector(selectAuth);
+ 
++  // Wait for saved data to load before deciding whether the user is signed in.
+   useEffect(() => {
+-    if (!auth) {
+-      router.push("/login");
+-    }
+-    setTimeout(() => {
+-      setLoading(false);
+-    }, 3000);
+-  }, [auth]);
++    if (hydrated && !auth) router.replace("/login");
++  }, [hydrated, auth, router]);
++
++  if (!hydrated || !auth) return <Loading />;
+ 
+-  let content = auth ? (
+-    loading ? (
+-      <Loading />
+-    ) : (
+-      <>
+-        <Header />
+-        <UserMenu workSpacesSelected={workSpacesSelected} />
+-        <div
+-          style={{ height: "calc(100vh - 120px)" }}
+-          className="flex overflow-x-auto transition-all duration-200 overflow-y-hidden"
+-        >
+-          <SideBar />
++  return (
++    <div className="flex h-dvh flex-col">
++      <Header />
++      <div className="flex min-h-0 flex-1">
++        <SideBar />
++        <main className="flex min-w-0 flex-1 flex-col">
++          <BoardToolbar />
+           <WorkSpace />
+-        </div>
+-      </>
+-    )
+-  ) : null;
+-  return <main>{content}</main>;
++        </main>
++      </div>
++    </div>
++  );
+ }
+diff --git a/src/components/Avatar.tsx b/src/components/Avatar.tsx
+new file mode 100644
+index 0000000..d2e39ad
+--- /dev/null
++++ b/src/components/Avatar.tsx
+@@ -0,0 +1,27 @@
++import { getAvatarColor, getInitials } from "@/utils/avatar";
++
++interface AvatarProps {
++  name: string;
++  size?: "sm" | "md";
++  className?: string;
++}
++
++export default function Avatar({
++  name,
++  size = "md",
++  className = "",
++}: AvatarProps) {
++  const dimensions = size === "sm" ? "h-6 w-6 text-[10px]" : "h-8 w-8 text-xs";
++  return (
++    <span
++      title={name}
++      aria-label={name}
++      role="img"
++      className={`inline-flex shrink-0 select-none items-center justify-center rounded-full font-bold text-white ${dimensions} ${getAvatarColor(
++        name
++      )} ${className}`}
++    >
++      {getInitials(name)}
++    </span>
++  );
++}
+diff --git a/src/components/Button.tsx b/src/components/Button.tsx
+index 5d9e3f5..971f92b 100644
+--- a/src/components/Button.tsx
++++ b/src/components/Button.tsx
+@@ -1,16 +1,37 @@
+-import React from "react";
++import type { ButtonHTMLAttributes } from "react";
+ 
+-export default function Button({ title, onClick, className }: any) {
++type Variant = "primary" | "secondary" | "danger" | "ghost";
++
++interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
++  variant?: Variant;
++  fullWidth?: boolean;
++}
++
++const base =
++  "inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 disabled:cursor-not-allowed disabled:opacity-50";
++
++const variants: Record<Variant, string> = {
++  primary: "bg-purple-600 text-white hover:bg-purple-500 active:bg-purple-700",
++  secondary:
++    "bg-zinc-800 text-zinc-100 hover:bg-zinc-700 active:bg-zinc-600 border border-zinc-700",
++  danger: "bg-red-600 text-white hover:bg-red-500 active:bg-red-700",
++  ghost: "text-zinc-300 hover:bg-white/10 hover:text-white",
++};
++
++export default function Button({
++  variant = "primary",
++  fullWidth = false,
++  type = "button",
++  className = "",
++  ...props
++}: ButtonProps) {
+   return (
+     <button
+-      onClick={onClick}
+-      className={`${
+-        className
+-          ? className
+-          : "bg-purple-500 font-semibold text-lg active:bg-black text-white rounded-md px-4 py-2 w-full"
+-      }`}
+-    >
+-      {title}
+-    </button>
++      type={type}
++      className={`${base} ${variants[variant]} ${
++        fullWidth ? "w-full" : ""
++      } ${className}`}
++      {...props}
++    />
+   );
+ }
+diff --git a/src/components/ConfirmDialog.tsx b/src/components/ConfirmDialog.tsx
+new file mode 100644
+index 0000000..70bc062
+--- /dev/null
++++ b/src/components/ConfirmDialog.tsx
+@@ -0,0 +1,49 @@
++"use client";
++
++import type { ReactNode } from "react";
++import Modal from "./Modal";
++import Button from "./Button";
++
++interface ConfirmDialogProps {
++  open: boolean;
++  title: string;
++  message: ReactNode;
++  confirmLabel?: string;
++  destructive?: boolean;
++  onConfirm: () => void;
++  onCancel: () => void;
++}
++
++export default function ConfirmDialog({
++  open,
++  title,
++  message,
++  confirmLabel = "Confirm",
++  destructive = false,
++  onConfirm,
++  onCancel,
++}: ConfirmDialogProps) {
++  return (
++    <Modal
++      open={open}
++      title={title}
++      size="sm"
++      onClose={onCancel}
++      footer={
++        <>
++          <Button variant="ghost" onClick={onCancel} data-autofocus>
++            Cancel
++          </Button>
++          <Button
++            variant={destructive ? "danger" : "primary"}
++            onClick={onConfirm}
++          >
++            {confirmLabel}
++          </Button>
++        </>
++      }
++    >
++      <p className="text-sm leading-relaxed text-zinc-300">{message}</p>
++    </Modal>
++  );
++}
+diff --git a/src/components/InlineInput.tsx b/src/components/InlineInput.tsx
+new file mode 100644
+index 0000000..09591b5
+--- /dev/null
++++ b/src/components/InlineInput.tsx
+@@ -0,0 +1,64 @@
++"use client";
++
++import { useRef } from "react";
++
++interface InlineInputProps {
++  initialValue?: string;
++  ariaLabel: string;
++  placeholder?: string;
++  maxLength?: number;
++  className?: string;
++  /** Called with the trimmed, non-empty value on Enter or blur. */
++  onCommit: (value: string) => void;
++  /** Called on Escape, or on blur when the value is empty. */
++  onCancel: () => void;
++}
++
++/**
++ * Single-line editor for renaming things in place.
++ * Enter / blur saves, Escape cancels. Mount it only while editing.
++ */
++export default function InlineInput({
++  initialValue = "",
++  ariaLabel,
++  placeholder,
++  maxLength = 60,
++  className = "",
++  onCommit,
++  onCancel,
++}: InlineInputProps) {
++  const inputRef = useRef<HTMLInputElement>(null);
++  const finished = useRef(false);
++
++  function finish(save: boolean) {
++    if (finished.current) return;
++    finished.current = true;
++    const value = inputRef.current?.value.trim() ?? "";
++    if (save && value) onCommit(value);
++    else onCancel();
++  }
++
++  return (
++    <input
++      ref={inputRef}
++      autoFocus
++      defaultValue={initialValue}
++      aria-label={ariaLabel}
++      placeholder={placeholder}
++      maxLength={maxLength}
++      onFocus={(event) => event.currentTarget.select()}
++      onBlur={() => finish(true)}
++      onKeyDown={(event) => {
++        if (event.key === "Enter") {
++          event.preventDefault();
++          finish(true);
++        } else if (event.key === "Escape") {
++          event.preventDefault();
++          event.stopPropagation();
++          finish(false);
++        }
++      }}
++      className={`field py-1.5 ${className}`}
++    />
++  );
++}
+diff --git a/src/components/Menu.tsx b/src/components/Menu.tsx
+new file mode 100644
+index 0000000..4fcbe76
+--- /dev/null
++++ b/src/components/Menu.tsx
+@@ -0,0 +1,111 @@
++"use client";
++
++import { useEffect, useId, useRef, useState, type ReactNode } from "react";
++import MoreHorizIcon from "@mui/icons-material/MoreHoriz";
++
++export interface MenuItem {
++  label: string;
++  icon?: ReactNode;
++  danger?: boolean;
++  onSelect: () => void;
++}
++
++interface MenuProps {
++  label: string;
++  items: MenuItem[];
++}
++
++/** Small dropdown menu: closes on outside click / Escape, arrow-key navigation. */
++export default function Menu({ label, items }: MenuProps) {
++  const [open, setOpen] = useState(false);
++  const rootRef = useRef<HTMLDivElement>(null);
++  const triggerRef = useRef<HTMLButtonElement>(null);
++  const menuId = useId();
++
++  useEffect(() => {
++    if (!open) return;
++
++    function onPointerDown(event: MouseEvent) {
++      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
++    }
++    function onKeyDown(event: KeyboardEvent) {
++      if (event.key === "Escape") {
++        setOpen(false);
++        triggerRef.current?.focus();
++      }
++    }
++    document.addEventListener("mousedown", onPointerDown);
++    document.addEventListener("keydown", onKeyDown);
++    return () => {
++      document.removeEventListener("mousedown", onPointerDown);
++      document.removeEventListener("keydown", onKeyDown);
++    };
++  }, [open]);
++
++  useEffect(() => {
++    if (open) {
++      rootRef.current
++        ?.querySelector<HTMLElement>('[role="menuitem"]')
++        ?.focus();
++    }
++  }, [open]);
++
++  function onMenuKeyDown(event: React.KeyboardEvent<HTMLUListElement>) {
++    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
++    event.preventDefault();
++    const entries = Array.from(
++      event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')
++    );
++    const index = entries.indexOf(document.activeElement as HTMLElement);
++    const next =
++      event.key === "ArrowDown"
++        ? (index + 1) % entries.length
++        : (index - 1 + entries.length) % entries.length;
++    entries[next]?.focus();
++  }
++
++  return (
++    <div ref={rootRef} className="relative">
++      <button
++        ref={triggerRef}
++        type="button"
++        className="icon-btn"
++        aria-label={label}
++        aria-haspopup="menu"
++        aria-expanded={open}
++        aria-controls={open ? menuId : undefined}
++        onClick={() => setOpen((value) => !value)}
++      >
++        <MoreHorizIcon fontSize="small" />
++      </button>
++      {open && (
++        <ul
++          id={menuId}
++          role="menu"
++          aria-label={label}
++          onKeyDown={onMenuKeyDown}
++          className="absolute right-0 top-full z-30 mt-1 min-w-44 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-800 py-1 text-sm shadow-xl"
++        >
++          {items.map((item) => (
++            <li key={item.label} role="none">
++              <button
++                type="button"
++                role="menuitem"
++                onClick={() => {
++                  setOpen(false);
++                  item.onSelect();
++                }}
++                className={`flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-white/10 focus:bg-white/10 focus:outline-none ${
++                  item.danger ? "text-red-400" : "text-zinc-100"
++                }`}
++              >
++                {item.icon}
++                {item.label}
++              </button>
++            </li>
++          ))}
++        </ul>
++      )}
++    </div>
++  );
++}
+diff --git a/src/components/Modal.tsx b/src/components/Modal.tsx
+index 35dccda..f27ab58 100644
+--- a/src/components/Modal.tsx
++++ b/src/components/Modal.tsx
+@@ -1,53 +1,131 @@
+-import { create } from "domain";
+-import React from "react";
++"use client";
+ 
++import { useEffect, useId, useRef, type ReactNode } from "react";
++import { createPortal } from "react-dom";
++import CloseIcon from "@mui/icons-material/Close";
++
++interface ModalProps {
++  open: boolean;
++  title: ReactNode;
++  onClose: () => void;
++  children: ReactNode;
++  footer?: ReactNode;
++  size?: "sm" | "md" | "lg";
++}
++
++const FOCUSABLE =
++  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
++
++const widths = { sm: "max-w-sm", md: "max-w-lg", lg: "max-w-2xl" } as const;
++
++/**
++ * Accessible dialog: portal, focus trap, Escape / backdrop to close,
++ * scroll lock and focus restoration. Mark an element with `data-autofocus`
++ * to choose which control receives focus first.
++ */
+ export default function Modal({
+-  createTitle,
+-  createBody,
+-  createActions,
+-  width,
++  open,
++  title,
+   onClose,
+-  show,
+-}: any) {
+-  return (
+-    <>
+-      {show && (
+-        <div className="bg-zinc-700/50 w-full h-screen absolute top-0 left-0 flex items-center justify-center z-10">
+-          <div
+-            style={{ width: width ? width : "fit-content" }}
+-            className="bg-zinc-950 p-10 rounded-md space-y-5  relative"
++  children,
++  footer,
++  size = "md",
++}: ModalProps) {
++  const titleId = useId();
++  const dialogRef = useRef<HTMLDivElement>(null);
++  const onCloseRef = useRef(onClose);
++
++  useEffect(() => {
++    onCloseRef.current = onClose;
++  });
++
++  useEffect(() => {
++    if (!open) return;
++    const dialog = dialogRef.current;
++    if (!dialog) return;
++
++    const previouslyFocused = document.activeElement as HTMLElement | null;
++    const previousOverflow = document.body.style.overflow;
++    document.body.style.overflow = "hidden";
++
++    const initial =
++      dialog.querySelector<HTMLElement>("[data-autofocus]") ??
++      dialog.querySelector<HTMLElement>(FOCUSABLE) ??
++      dialog;
++    initial.focus();
++
++    function onKeyDown(event: KeyboardEvent) {
++      if (event.key === "Escape") {
++        event.stopPropagation();
++        onCloseRef.current();
++        return;
++      }
++      if (event.key !== "Tab" || !dialog) return;
++
++      const items = Array.from(
++        dialog.querySelectorAll<HTMLElement>(FOCUSABLE)
++      );
++      if (items.length === 0) {
++        event.preventDefault();
++        return;
++      }
++      const first = items[0];
++      const last = items[items.length - 1];
++      if (event.shiftKey && document.activeElement === first) {
++        event.preventDefault();
++        last.focus();
++      } else if (!event.shiftKey && document.activeElement === last) {
++        event.preventDefault();
++        first.focus();
++      }
++    }
++
++    document.addEventListener("keydown", onKeyDown);
++    return () => {
++      document.removeEventListener("keydown", onKeyDown);
++      document.body.style.overflow = previousOverflow;
++      previouslyFocused?.focus?.();
++    };
++  }, [open]);
++
++  if (!open || typeof document === "undefined") return null;
++
++  return createPortal(
++    <div
++      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
++      onMouseDown={(event) => {
++        if (event.target === event.currentTarget) onClose();
++      }}
++    >
++      <div
++        ref={dialogRef}
++        role="dialog"
++        aria-modal="true"
++        aria-labelledby={titleId}
++        tabIndex={-1}
++        className={`flex max-h-[90dvh] w-full ${widths[size]} flex-col rounded-xl border border-zinc-800 bg-zinc-900 shadow-2xl shadow-purple-900/20 focus:outline-none`}
++      >
++        <div className="flex items-center justify-between gap-4 border-b border-zinc-800 px-6 py-4">
++          <h2 id={titleId} className="text-lg font-semibold text-white">
++            {title}
++          </h2>
++          <button
++            type="button"
++            onClick={onClose}
++            className="icon-btn"
++            aria-label="Close dialog"
+           >
+-            <div className="">
+-              {createTitle}
+-              <button
+-                onClick={onClose}
+-                type="button"
+-                className="end-2.5 text-gray-400 bg-transparent hover:bg-gray-200 hover:text-gray-900 rounded-lg text-sm w-8 h-8 ms-auto inline-flex justify-center items-center dark:hover:bg-gray-600  dark:hover:text-white absolute top-2 right-2"
+-                data-modal-hide="authentication-modal"
+-              >
+-                <svg
+-                  className="w-3 h-3"
+-                  aria-hidden="true"
+-                  xmlns="http://www.w3.org/2000/svg"
+-                  fill="none"
+-                  viewBox="0 0 14 14"
+-                >
+-                  <path
+-                    stroke="currentColor"
+-                    strokeLinecap="round"
+-                    strokeLinejoin="round"
+-                    strokeWidth="2"
+-                    d="m1 1 6 6m0 0 6 6M7 7l6-6M7 7l-6 6"
+-                  />
+-                </svg>
+-                <span className="sr-only">Close modal</span>
+-              </button>
+-            </div>
+-            <div>{createBody}</div>
+-            <div>{createActions}</div>
+-          </div>
++            <CloseIcon fontSize="small" />
++          </button>
+         </div>
+-      )}
+-    </>
++        <div className="flex-1 overflow-y-auto px-6 py-5">{children}</div>
++        {footer && (
++          <div className="flex items-center justify-end gap-3 border-t border-zinc-800 px-6 py-4">
++            {footer}
++          </div>
++        )}
++      </div>
++    </div>,
++    document.body
+   );
+ }
+diff --git a/src/components/loading.tsx b/src/components/loading.tsx
+index e98a67e..f0d7a6e 100644
+--- a/src/components/loading.tsx
++++ b/src/components/loading.tsx
+@@ -1,14 +1,12 @@
+-import React from "react";
+-
+-export default function Loading() {
++export default function Loading({ label = "Loading…" }: { label?: string }) {
+   return (
+     <div
+-      className="status w-full h-screen flex items-center justify-center bg-zinc-900"
+       role="status"
++      className="flex h-dvh w-full items-center justify-center bg-zinc-950"
+     >
+       <svg
+         aria-hidden="true"
+-        className="w-[100px] h-[100px] text-gray-200 animate-spin dark:text-gray-600 fill-purple-600"
++        className="h-16 w-16 animate-spin text-zinc-700"
+         viewBox="0 0 100 101"
+         fill="none"
+         xmlns="http://www.w3.org/2000/svg"
+@@ -19,9 +17,10 @@ export default function Loading() {
+         />
+         <path
+           d="M93.9676 39.0409C96.393 38.4038 97.8624 35.9116 97.0079 33.5539C95.2932 28.8227 92.871 24.3692 89.8167 20.348C85.8452 15.1192 80.8826 10.7238 75.2124 7.41289C69.5422 4.10194 63.2754 1.94025 56.7698 1.05124C51.7666 0.367541 46.6976 0.446843 41.7345 1.27873C39.2613 1.69328 37.813 4.19778 38.4501 6.62326C39.0873 9.04874 41.5694 10.4717 44.0505 10.1071C47.8511 9.54855 51.7191 9.52689 55.5402 10.0491C60.8642 10.7766 65.9928 12.5457 70.6331 15.2552C75.2735 17.9648 79.3347 21.5619 82.5849 25.841C84.9175 28.9121 86.7997 32.2913 88.1811 35.8758C89.083 38.2158 91.5421 39.6781 93.9676 39.0409Z"
+-          fill="currentFill"
++          className="fill-purple-500"
+         />
+       </svg>
++      <span className="sr-only">{label}</span>
+     </div>
+   );
+ }
+diff --git a/src/components/options.tsx b/src/components/options.tsx
+deleted file mode 100644
+index de36e0f..0000000
+--- a/src/components/options.tsx
++++ /dev/null
+@@ -1,32 +0,0 @@
+-import React from "react";
+-interface item {
+-  name: string;
+-  func: any;
+-  icon: any;
+-}
+-export default function Options({
+-  items,
+-  show,
+-}: {
+-  show: boolean;
+-  items: item[];
+-}) {
+-  return (
+-    <>
+-      {show && (
+-        <ul className="w-fit text-sm font-medium text-white bg-white/10 border border-gray-200/30 rounded-lg absolute top-10 -right-10">
+-          {items.map((i: item, index: number) => (
+-            <li
+-              key={index}
+-              onClick={i.func}
+-              className="w-full px-4 py-2 border-b border-gray-200 rounded-t-lg dark:border-gray-600 cursor-pointer active:bg-white/30 flex gap-2"
+-            >
+-              {i.icon}
+-              {i.name}
+-            </li>
+-          ))}
+-        </ul>
+-      )}
+-    </>
+-  );
+-}
+diff --git a/src/redux/Providers.tsx b/src/redux/Providers.tsx
+index 28ac304..6674d7f 100644
+--- a/src/redux/Providers.tsx
++++ b/src/redux/Providers.tsx
+@@ -1,8 +1,65 @@
+ "use client";
+ 
++import { useEffect, useState } from "react";
+ import { Provider } from "react-redux";
+-import { store } from "./store";
++import { MotionConfig } from "framer-motion";
++import { makeStore } from "./store";
++import { hydrate, type PersistedState } from "./slices/userSlice";
++import { loadState, saveState } from "./storage";
++
++const SAVE_DELAY_MS = 250;
+ 
+ export default function Providers({ children }: { children: React.ReactNode }) {
+-  return <Provider store={store}>{children}</Provider>;
++  const [store] = useState(makeStore);
++
++  useEffect(() => {
++    // Restore saved data after mount so server and client markup always match.
++    store.dispatch(hydrate(loadState()));
++
++    const pick = (): PersistedState => {
++      const { workSpaceId, workSpaces, columns, tasks, auth } =
++        store.getState().user;
++      return { workSpaceId, workSpaces, columns, tasks, auth };
++    };
++
++    let previous = pick();
++    let timer: ReturnType<typeof setTimeout> | undefined;
++    let dirty = false;
++
++    const flush = () => {
++      if (timer) clearTimeout(timer);
++      if (!dirty) return;
++      dirty = false;
++      saveState(pick());
++    };
++
++    const unsubscribe = store.subscribe(() => {
++      const next = pick();
++      const changed =
++        next.workSpaceId !== previous.workSpaceId ||
++        next.workSpaces !== previous.workSpaces ||
++        next.columns !== previous.columns ||
++        next.tasks !== previous.tasks ||
++        next.auth !== previous.auth;
++      if (!changed) return;
++      previous = next;
++      dirty = true;
++      if (timer) clearTimeout(timer);
++      timer = setTimeout(flush, SAVE_DELAY_MS);
++    });
++
++    window.addEventListener("pagehide", flush);
++    return () => {
++      window.removeEventListener("pagehide", flush);
++      unsubscribe();
++      flush();
++    };
++  }, [store]);
++
++  return (
++    <Provider store={store}>
++      {/* Respect the OS "reduce motion" setting for every animation. */}
++      <MotionConfig reducedMotion="user">{children}</MotionConfig>
++    </Provider>
++  );
+ }
+diff --git a/src/redux/hooks.ts b/src/redux/hooks.ts
+index c8ebeaa..7fd1eea 100644
+--- a/src/redux/hooks.ts
++++ b/src/redux/hooks.ts
+@@ -1,6 +1,5 @@
+-import type { TypedUseSelectorHook } from "react-redux";
+ import { useDispatch, useSelector } from "react-redux";
+ import type { AppDispatch, RootState } from "./store";
+ 
+-export const useAppDispatch: () => AppDispatch = useDispatch;
+-export const useAppSelector: TypedUseSelectorHook<RootState> = useSelector;
++export const useAppDispatch = useDispatch.withTypes<AppDispatch>();
++export const useAppSelector = useSelector.withTypes<RootState>();
+diff --git a/src/redux/slices/userSlice.ts b/src/redux/slices/userSlice.ts
+new file mode 100644
+index 0000000..45068ba
+--- /dev/null
++++ b/src/redux/slices/userSlice.ts
+@@ -0,0 +1,410 @@
++import {
++  createSelector,
++  createSlice,
++  nanoid,
++  type PayloadAction,
++} from "@reduxjs/toolkit";
++import type { RootState } from "../store";
++import type { Column, Task, UserProfile, Workspace } from "@/types";
++
++/* ------------------------------------------------------------------ */
++/* State                                                               */
++/* ------------------------------------------------------------------ */
++
++export interface PersistedState {
++  auth: boolean;
++  workSpaceId: string;
++  workSpaces: Workspace[];
++  columns: Column[];
++  tasks: Task[];
++}
++
++interface UserState extends PersistedState {
++  /** True once saved data has been read from storage (client only). */
++  hydrated: boolean;
++  searchQuery: string;
++  user: UserProfile;
++}
++
++export const DEFAULT_COLUMN_TITLES = ["To do", "In progress", "Done"] as const;
++
++const initialState: UserState = {
++  hydrated: false,
++  auth: false,
++  searchQuery: "",
++  user: { name: "test", lastName: "user" },
++  workSpaceId: "ws-chat",
++  workSpaces: [
++    { id: "ws-chat", title: "Chat app", isFavorite: true },
++    { id: "ws-todo", title: "Todo list", isFavorite: false },
++    { id: "ws-product", title: "New product", isFavorite: false },
++  ],
++  columns: [
++    { id: "col-chat-backlog", workSpaceId: "ws-chat", title: "Backlog" },
++    { id: "col-chat-progress", workSpaceId: "ws-chat", title: "In progress" },
++    { id: "col-chat-done", workSpaceId: "ws-chat", title: "Done" },
++    { id: "col-todo-backlog", workSpaceId: "ws-todo", title: "Backlog" },
++    { id: "col-todo-progress", workSpaceId: "ws-todo", title: "In progress" },
++    { id: "col-todo-done", workSpaceId: "ws-todo", title: "Done" },
++    { id: "col-product-backlog", workSpaceId: "ws-product", title: "Backlog" },
++  ],
++  tasks: [
++    {
++      id: "task-1",
++      workSpaceId: "ws-chat",
++      columnId: "col-chat-backlog",
++      description: "Design the message bubble component",
++      assignees: ["mohamad", "shervan"],
++    },
++    {
++      id: "task-2",
++      workSpaceId: "ws-chat",
++      columnId: "col-chat-backlog",
++      description: "Create a reusable modal",
++      assignees: ["ahmad", "hosein"],
++    },
++    {
++      id: "task-3",
++      workSpaceId: "ws-chat",
++      columnId: "col-chat-progress",
++      description: "Fix responsive layout on small screens",
++      assignees: ["payam", "shervan"],
++    },
++    {
++      id: "task-4",
++      workSpaceId: "ws-todo",
++      columnId: "col-todo-backlog",
++      description: "Create button component",
++      assignees: ["mohamad", "shervan", "ali"],
++    },
++    {
++      id: "task-5",
++      workSpaceId: "ws-todo",
++      columnId: "col-todo-backlog",
++      description: "Create modal",
++      assignees: ["ali"],
++    },
++    {
++      id: "task-6",
++      workSpaceId: "ws-todo",
++      columnId: "col-todo-progress",
++      description: "Persist todos in local storage",
++      assignees: ["mohamad", "shervan", "ali", "payam", "hosein", "ahmad"],
++    },
++    {
++      id: "task-7",
++      workSpaceId: "ws-product",
++      columnId: "col-product-backlog",
++      description: "Write the product brief",
++      assignees: [],
++    },
++    {
++      id: "task-8",
++      workSpaceId: "ws-product",
++      columnId: "col-product-backlog",
++      description: "Collect user feedback",
++      assignees: ["ali"],
++    },
++  ],
++};
++
++/* ------------------------------------------------------------------ */
++/* Helpers                                                             */
++/* ------------------------------------------------------------------ */
++
++/** Moves an item inside an (immer draft) array. */
++function moveItem<T>(list: T[], from: number, to: number) {
++  const [item] = list.splice(from, 1);
++  list.splice(to, 0, item);
++}
++
++function normalizeAssignees(names: string[]): string[] {
++  const seen = new Set<string>();
++  const result: string[] = [];
++  for (const raw of names) {
++    const name = raw.trim();
++    const key = name.toLowerCase();
++    if (!name || seen.has(key)) continue;
++    seen.add(key);
++    result.push(name);
++  }
++  return result;
++}
++
++/* ------------------------------------------------------------------ */
++/* Slice                                                               */
++/* ------------------------------------------------------------------ */
++
++const userSlice = createSlice({
++  name: "user",
++  initialState,
++  reducers: {
++    /* ---- app / auth ---- */
++    hydrate(state, action: PayloadAction<PersistedState | null>) {
++      const saved = action.payload;
++      if (saved) {
++        state.auth = saved.auth;
++        state.workSpaces = saved.workSpaces;
++        state.columns = saved.columns;
++        state.tasks = saved.tasks;
++        state.workSpaceId = saved.workSpaces.some(
++          (w) => w.id === saved.workSpaceId
++        )
++          ? saved.workSpaceId
++          : saved.workSpaces[0]?.id ?? "";
++      }
++      state.hydrated = true;
++    },
++    signIn(state) {
++      state.auth = true;
++    },
++    signOut(state) {
++      state.auth = false;
++      state.searchQuery = "";
++    },
++    setSearchQuery(state, action: PayloadAction<string>) {
++      state.searchQuery = action.payload;
++    },
++
++    /* ---- workspaces ---- */
++    addWorkSpace: {
++      reducer(
++        state,
++        action: PayloadAction<{
++          id: string;
++          title: string;
++          columnIds: string[];
++        }>
++      ) {
++        const { id, title, columnIds } = action.payload;
++        const trimmed = title.trim();
++        if (!trimmed) return;
++        state.workSpaces.push({ id, title: trimmed, isFavorite: false });
++        DEFAULT_COLUMN_TITLES.forEach((columnTitle, index) => {
++          state.columns.push({
++            id: columnIds[index],
++            workSpaceId: id,
++            title: columnTitle,
++          });
++        });
++        state.workSpaceId = id;
++        state.searchQuery = "";
++      },
++      prepare(title: string) {
++        return {
++          payload: {
++            id: nanoid(),
++            title,
++            columnIds: DEFAULT_COLUMN_TITLES.map(() => nanoid()),
++          },
++        };
++      },
++    },
++    selectWorkSpace(state, action: PayloadAction<string>) {
++      if (!state.workSpaces.some((w) => w.id === action.payload)) return;
++      if (state.workSpaceId !== action.payload) state.searchQuery = "";
++      state.workSpaceId = action.payload;
++    },
++    renameWorkSpace(
++      state,
++      action: PayloadAction<{ id: string; title: string }>
++    ) {
++      const title = action.payload.title.trim();
++      const workSpace = state.workSpaces.find((w) => w.id === action.payload.id);
++      if (workSpace && title) workSpace.title = title;
++    },
++    toggleFavorite(state, action: PayloadAction<string>) {
++      const workSpace = state.workSpaces.find((w) => w.id === action.payload);
++      if (workSpace) workSpace.isFavorite = !workSpace.isFavorite;
++    },
++    deleteWorkSpace(state, action: PayloadAction<string>) {
++      const id = action.payload;
++      state.workSpaces = state.workSpaces.filter((w) => w.id !== id);
++      state.columns = state.columns.filter((c) => c.workSpaceId !== id);
++      state.tasks = state.tasks.filter((t) => t.workSpaceId !== id);
++      if (state.workSpaceId === id) {
++        state.workSpaceId = state.workSpaces[0]?.id ?? "";
++        state.searchQuery = "";
++      }
++    },
++
++    /* ---- columns ---- */
++    addColumn: {
++      reducer(
++        state,
++        action: PayloadAction<{
++          id: string;
++          workSpaceId: string;
++          title: string;
++        }>
++      ) {
++        const { id, workSpaceId, title } = action.payload;
++        const trimmed = title.trim();
++        if (!trimmed) return;
++        if (!state.workSpaces.some((w) => w.id === workSpaceId)) return;
++        state.columns.push({ id, workSpaceId, title: trimmed });
++      },
++      prepare(payload: { workSpaceId: string; title: string }) {
++        return { payload: { ...payload, id: nanoid() } };
++      },
++    },
++    renameColumn(state, action: PayloadAction<{ id: string; title: string }>) {
++      const title = action.payload.title.trim();
++      const column = state.columns.find((c) => c.id === action.payload.id);
++      if (column && title) column.title = title;
++    },
++    deleteColumn(state, action: PayloadAction<string>) {
++      state.columns = state.columns.filter((c) => c.id !== action.payload);
++      state.tasks = state.tasks.filter((t) => t.columnId !== action.payload);
++    },
++    reorderColumns(
++      state,
++      action: PayloadAction<{ activeId: string; overId: string }>
++    ) {
++      const { activeId, overId } = action.payload;
++      if (activeId === overId) return;
++      const from = state.columns.findIndex((c) => c.id === activeId);
++      const to = state.columns.findIndex((c) => c.id === overId);
++      if (from < 0 || to < 0) return;
++      moveItem(state.columns, from, to);
++    },
++
++    /* ---- tasks ---- */
++    addTask: {
++      reducer(
++        state,
++        action: PayloadAction<{
++          id: string;
++          workSpaceId: string;
++          columnId: string;
++          description: string;
++        }>
++      ) {
++        const { id, workSpaceId, columnId, description } = action.payload;
++        const trimmed = description.trim();
++        if (!trimmed) return;
++        if (!state.columns.some((c) => c.id === columnId)) return;
++        state.tasks.push({
++          id,
++          workSpaceId,
++          columnId,
++          description: trimmed,
++          assignees: [],
++        });
++      },
++      prepare(payload: {
++        workSpaceId: string;
++        columnId: string;
++        description: string;
++      }) {
++        return { payload: { ...payload, id: nanoid() } };
++      },
++    },
++    editTask(
++      state,
++      action: PayloadAction<{
++        id: string;
++        description: string;
++        assignees: string[];
++      }>
++    ) {
++      const task = state.tasks.find((t) => t.id === action.payload.id);
++      const description = action.payload.description.trim();
++      if (!task || !description) return;
++      task.description = description;
++      task.assignees = normalizeAssignees(action.payload.assignees);
++    },
++    deleteTask(state, action: PayloadAction<string>) {
++      state.tasks = state.tasks.filter((t) => t.id !== action.payload);
++    },
++    /**
++     * Drag & drop. Dropping on a task puts the dragged task at that task's
++     * position (and in its column); dropping on a column appends to it.
++     */
++    moveTask(
++      state,
++      action: PayloadAction<{
++        activeId: string;
++        overId: string;
++        overType: "Task" | "Column";
++      }>
++    ) {
++      const { activeId, overId, overType } = action.payload;
++      const from = state.tasks.findIndex((t) => t.id === activeId);
++      if (from < 0) return;
++      const task = state.tasks[from];
++
++      if (overType === "Task") {
++        const to = state.tasks.findIndex((t) => t.id === overId);
++        if (to < 0 || to === from) return;
++        task.columnId = state.tasks[to].columnId;
++        task.workSpaceId = state.tasks[to].workSpaceId;
++        moveItem(state.tasks, from, to);
++        return;
++      }
++
++      if (task.columnId === overId) return;
++      const column = state.columns.find((c) => c.id === overId);
++      if (!column) return;
++      task.columnId = column.id;
++      task.workSpaceId = column.workSpaceId;
++      moveItem(state.tasks, from, state.tasks.length - 1);
++    },
++    /** Restores a snapshot, used when a drag is cancelled. */
++    setTasks(state, action: PayloadAction<Task[]>) {
++      state.tasks = action.payload;
++    },
++  },
++});
++
++export default userSlice.reducer;
++
++export const {
++  hydrate,
++  signIn,
++  signOut,
++  setSearchQuery,
++  addWorkSpace,
++  selectWorkSpace,
++  renameWorkSpace,
++  toggleFavorite,
++  deleteWorkSpace,
++  addColumn,
++  renameColumn,
++  deleteColumn,
++  reorderColumns,
++  addTask,
++  editTask,
++  deleteTask,
++  moveTask,
++  setTasks,
++} = userSlice.actions;
++
++/* ------------------------------------------------------------------ */
++/* Selectors                                                           */
++/* ------------------------------------------------------------------ */
++
++export const selectHydrated = (state: RootState) => state.user.hydrated;
++export const selectAuth = (state: RootState) => state.user.auth;
++export const selectUser = (state: RootState) => state.user.user;
++export const selectSearchQuery = (state: RootState) => state.user.searchQuery;
++export const selectWorkSpaces = (state: RootState) => state.user.workSpaces;
++export const selectActiveWorkSpaceId = (state: RootState) =>
++  state.user.workSpaceId;
++export const selectAllColumns = (state: RootState) => state.user.columns;
++export const selectAllTasks = (state: RootState) => state.user.tasks;
++
++export const selectActiveWorkSpace = createSelector(
++  [selectWorkSpaces, selectActiveWorkSpaceId],
++  (workSpaces, id) => workSpaces.find((w) => w.id === id) ?? null
++);
++
++export const selectActiveColumns = createSelector(
++  [selectAllColumns, selectActiveWorkSpaceId],
++  (columns, id) => columns.filter((c) => c.workSpaceId === id)
++);
++
++export const selectActiveTasks = createSelector(
++  [selectAllTasks, selectActiveWorkSpaceId],
++  (tasks, id) => tasks.filter((t) => t.workSpaceId === id)
++);
+diff --git a/src/redux/slices/userSlice.tsx b/src/redux/slices/userSlice.tsx
+deleted file mode 100644
+index d1d037e..0000000
+--- a/src/redux/slices/userSlice.tsx
++++ /dev/null
+@@ -1,356 +0,0 @@
+-import { createSlice, PayloadAction } from "@reduxjs/toolkit";
+-import { RootState } from "../store";
+-import { v4 as uuidv4 } from "uuid";
+-
+-interface Workspace {
+-  id: string;
+-  title: string;
+-  isFovrite: boolean;
+-}
+-
+-interface user {
+-  name: string;
+-  lastName: string;
+-}
+-
+-interface task {
+-  workSpaceId: string;
+-  description: string;
+-  columnId: string;
+-  id: string;
+-  status: string; //TODO change status to state
+-  assignment: string[] | null;
+-}
+-
+-interface taskPayload {
+-  workSpaceId: string;
+-  columnId: string;
+-  description: string;
+-  status: string;
+-  assignment: string;
+-}
+-
+-interface columnPayload {
+-  workSpaceId: string;
+-  title: string;
+-  id?: any;
+-}
+-
+-interface column {
+-  workSpaceId: string;
+-  title: string;
+-  id: any;
+-}
+-
+-interface workSpacePayload {
+-  title: string;
+-  id: any;
+-}
+-
+-interface editTask {
+-  description: string;
+-  id: any;
+-  assignment: string[];
+-}
+-
+-interface userState {
+-  workSpaceId: string;
+-  workSpaces: Workspace[];
+-  auth: boolean;
+-  user: user;
+-  statusList: any;
+-  columns: column[];
+-  tasks: task[];
+-}
+-
+-const initialState: userState = {
+-  workSpaceId: "1c1h2",
+-  workSpaces: [
+-    { id: "1c1h2", title: "chat-app", isFovrite: false },
+-    { id: "1c1h3", title: "todolist", isFovrite: false },
+-    { id: "1c1h4", title: "new product", isFovrite: false },
+-  ],
+-  auth: false,
+-  user: {
+-    name: "test",
+-    lastName: "user",
+-  },
+-  statusList: ["backLog", "pending", "finish", "issuse"],
+-  columns: [
+-    {
+-      workSpaceId: "1c1h2",
+-      title: "backLog",
+-      id: "11",
+-    },
+-    {
+-      workSpaceId: "1c1h2",
+-      title: "pending",
+-      id: "12",
+-    },
+-    {
+-      workSpaceId: "1c1h3",
+-      title: "backLog",
+-      id: "111",
+-    },
+-    {
+-      workSpaceId: "1c1h4",
+-      title: "backLog",
+-      id: "1111",
+-    },
+-    {
+-      workSpaceId: "1c1h3",
+-      title: "pending",
+-      id: "122",
+-    },
+-    {
+-      workSpaceId: "1c1h3",
+-      title: "finish",
+-      id: "123",
+-    },
+-  ],
+-  tasks: [
+-    {
+-      workSpaceId: "1c1h4",
+-      description: "create button",
+-      columnId: "1111",
+-      id: uuidv4(),
+-      status: "backLog" || "pending" || "finish" || "issuse",
+-      assignment: ["mohamad", "shervan", "ali"],
+-    },
+-    {
+-      workSpaceId: "1c1h4",
+-      description: "create button",
+-      columnId: "1111",
+-      id: uuidv4(),
+-      status: "backLog" || "pending" || "finish" || "issuse",
+-      assignment: ["mohamad", "shervan", "ali"],
+-    },
+-    {
+-      workSpaceId: "1c1h4",
+-      description: "create button",
+-      columnId: "1111",
+-      id: uuidv4(),
+-      status: "backLog" || "pending" || "finish" || "issuse",
+-      assignment: ["mohamad", "shervan", "ali"],
+-    },
+-    {
+-      workSpaceId: "1c1h3",
+-      description: "create button",
+-      columnId: "111",
+-      id: uuidv4(),
+-      status: "backLog" || "pending" || "finish" || "issuse",
+-      assignment: ["mohamad", "shervan", "ali"],
+-    },
+-    {
+-      workSpaceId: "1c1h3",
+-      description: "create button",
+-      columnId: "122",
+-      id: uuidv4(),
+-      status: "backLog" || "pending" || "finish" || "issuse",
+-      assignment: ["mohamad", "shervan", "ali"],
+-    },
+-    {
+-      workSpaceId: "1c1h3",
+-      description: "create modal",
+-      columnId: "111",
+-      id: uuidv4(),
+-      status: "backLog" || "pending" || "finish" || "issuse",
+-      assignment: ["mohamad", "shervan", "ali"],
+-    },
+-    {
+-      workSpaceId: "1c1h3",
+-      description: "create button",
+-      columnId: "122",
+-      id: uuidv4(),
+-      status: "backLog" || "pending" || "finish" || "issuse",
+-      assignment: ["mohamad", "shervan", "ali"],
+-    },
+-    {
+-      workSpaceId: "1c1h2",
+-      description: "create button",
+-      columnId: "11",
+-      id: uuidv4(),
+-      status: "backLog" || "pending" || "finish" || "issuse",
+-      assignment: ["mohamad", "shervan", "ali"],
+-    },
+-    {
+-      workSpaceId: "1c1h2",
+-      description: "create modal",
+-      columnId: "11",
+-      id: uuidv4(),
+-      status: "backLog" || "pending" || "finish" || "issuse",
+-      assignment: ["ahmad", "hosein"],
+-    },
+-    {
+-      workSpaceId: "1c1h2",
+-      description: "fix responsive",
+-      columnId: "12",
+-      id: uuidv4(),
+-      status: "backLog" || "pending" || "finish" || "issuse",
+-      assignment: ["payam", "shervan"],
+-    },
+-  ],
+-};
+-
+-const userSlice = createSlice({
+-  name: "user",
+-  initialState,
+-  reducers: {
+-    selectWorkSpace(state, action: PayloadAction<string>) {
+-      state.workSpaceId = action.payload;
+-    },
+-    changeAuth(state, action: PayloadAction<boolean>) {
+-      state.auth = action.payload;
+-    },
+-    addNewWorkSpace(state, action: PayloadAction<string>) {
+-      const newWorkSpace = {
+-        id: uuidv4(),
+-        title: action.payload,
+-        isFovrite: false,
+-      };
+-      state.workSpaces.push(newWorkSpace);
+-    },
+-    addWorkspace(state, action: PayloadAction<string>) {
+-      const newWorkspace: Workspace = {
+-        id: uuidv4(),
+-        title: action.payload,
+-        isFovrite: false,
+-      };
+-      state.workSpaces.push(newWorkspace);
+-    },
+-    changeWorkSpaceName(state, action: PayloadAction<workSpacePayload>) {
+-      const { id, title } = action.payload;
+-      const newWorkSpaces = state.workSpaces.map((i) => {
+-        if (i.id === id) {
+-          return {
+-            ...i,
+-            title: title,
+-          };
+-        } else {
+-          return { ...i };
+-        }
+-      });
+-      state.workSpaces = newWorkSpaces;
+-    },
+-    toggleFavorite(state, action: PayloadAction<string>) {
+-      const workspaceId = action.payload;
+-      const workspaceToUpdate = state.workSpaces.map((i) => {
+-        if (i.id === workspaceId) {
+-          return {
+-            ...i,
+-            isFovrite: !i.isFovrite,
+-          };
+-        } else {
+-          return { ...i };
+-        }
+-      });
+-      state.workSpaces = workspaceToUpdate;
+-    },
+-    deleteWorkSpace(state, action: PayloadAction<string>) {
+-      const workspaceId = action.payload;
+-      const workspaceDelete = state.workSpaces.filter(
+-        (i) => i.id !== workspaceId
+-      );
+-      state.workSpaces = workspaceDelete;
+-    },
+-    addTask(state, action: PayloadAction<taskPayload>) {
+-      const newTask: task = {
+-        workSpaceId: action.payload.workSpaceId,
+-        description: action.payload.description,
+-        columnId: action.payload.columnId,
+-        id: uuidv4(),
+-        status: action.payload.status,
+-        assignment: null,
+-      };
+-
+-      state.tasks.push(newTask);
+-    },
+-    changeNameColumn(state, action: PayloadAction<columnPayload>) {
+-      const { id, title } = action.payload;
+-
+-      const newColumns = state.columns.map((i) => {
+-        if (i.id === id) {
+-          return { ...i, title: title };
+-        }
+-        return i;
+-      });
+-
+-      state.columns = newColumns;
+-    },
+-    addFirstColumn(state, action: PayloadAction<columnPayload>) {
+-      const { workSpaceId, title } = action.payload;
+-
+-      const newColumn = {
+-        workSpaceId: workSpaceId,
+-        title: title,
+-        id: uuidv4(),
+-      };
+-
+-      state.columns.push(newColumn);
+-    },
+-    addColumn(state, action: PayloadAction<columnPayload>) {
+-      const newColumn = {
+-        workSpaceId: action.payload.workSpaceId,
+-        title: action.payload.title,
+-        id: uuidv4(),
+-      };
+-      state.columns.push(newColumn);
+-    },
+-    deleteColumn(state, action: PayloadAction<columnPayload>) {
+-      const newColumns = state.columns.filter(
+-        (i) => i.id !== action.payload.id
+-      );
+-      const newTasks = state.tasks.filter(
+-        (i) => i.columnId !== action.payload.id
+-      );
+-
+-      state.columns = newColumns;
+-      state.tasks = newTasks;
+-    },
+-    editTask(state, action: PayloadAction<editTask>) {
+-      const { id, description, assignment } = action.payload;
+-      const newTasks = state.tasks.map((i) => {
+-        if (i.id === id) {
+-          return {
+-            ...i,
+-            description: description,
+-            assignment: assignment,
+-          };
+-        } else {
+-          return i;
+-        }
+-      });
+-
+-      state.tasks = newTasks;
+-    },
+-    deleteTask(state, action: PayloadAction<string>) {
+-      const newTasks = state.tasks.filter((i) => i.id !== action.payload);
+-      state.tasks = newTasks;
+-    },
+-  },
+-});
+-
+-export default userSlice.reducer;
+-export const selectWorkSpaces = (state: RootState) => state.user.workSpaces;
+-export const getAuth = (state: RootState) => state.user.auth;
+-export const getColumns = (state: RootState) => state.user.columns;
+-export const getTasks = (state: RootState) => state.user.tasks;
+-export const getStatusList = (state: RootState) => state.user.statusList;
+-export const getWorkSpaceId = (state: RootState) => state.user.workSpaceId;
+-export const getWorkSpaces = (state: RootState) => state.user.workSpaces;
+-export const {
+-  addWorkspace,
+-  toggleFavorite,
+-  deleteWorkSpace,
+-  changeAuth,
+-  addTask,
+-  changeNameColumn,
+-  addColumn,
+-  deleteColumn,
+-  changeWorkSpaceName,
+-  addNewWorkSpace,
+-  editTask,
+-  selectWorkSpace,
+-  addFirstColumn,
+-  deleteTask,
+-} = userSlice.actions;
+diff --git a/src/redux/storage.ts b/src/redux/storage.ts
+new file mode 100644
+index 0000000..807b914
+--- /dev/null
++++ b/src/redux/storage.ts
+@@ -0,0 +1,39 @@
++import type { PersistedState } from "./slices/userSlice";
++
++const STORAGE_KEY = "issue-tracker:state";
++const STORAGE_VERSION = 2;
++
++function isPersistedState(value: unknown): value is PersistedState {
++  if (!value || typeof value !== "object") return false;
++  const v = value as Record<string, unknown>;
++  return (
++    typeof v.workSpaceId === "string" &&
++    typeof v.auth === "boolean" &&
++    Array.isArray(v.workSpaces) &&
++    Array.isArray(v.columns) &&
++    Array.isArray(v.tasks)
++  );
++}
++
++export function loadState(): PersistedState | null {
++  try {
++    const raw = window.localStorage.getItem(STORAGE_KEY);
++    if (!raw) return null;
++    const parsed = JSON.parse(raw);
++    if (parsed?.version !== STORAGE_VERSION) return null;
++    return isPersistedState(parsed.state) ? parsed.state : null;
++  } catch {
++    return null;
++  }
++}
++
++export function saveState(state: PersistedState): void {
++  try {
++    window.localStorage.setItem(
++      STORAGE_KEY,
++      JSON.stringify({ version: STORAGE_VERSION, state })
++    );
++  } catch {
++    // Storage can be full or disabled (private mode); the app keeps working in memory.
++  }
++}
+diff --git a/src/redux/store.ts b/src/redux/store.ts
+index c3c4dee..9867439 100644
+--- a/src/redux/store.ts
++++ b/src/redux/store.ts
+@@ -1,11 +1,15 @@
+ import { configureStore } from "@reduxjs/toolkit";
+ import userReducer from "./slices/userSlice";
+ 
+-export const store = configureStore({
+-  reducer: {
+-    user: userReducer,
+-  },
+-});
++// A factory (instead of a module singleton) keeps state from leaking between
++// server-side requests.
++export const makeStore = () =>
++  configureStore({
++    reducer: {
++      user: userReducer,
++    },
++  });
+ 
+-export type RootState = ReturnType<typeof store.getState>;
+-export type AppDispatch = typeof store.dispatch;
++export type AppStore = ReturnType<typeof makeStore>;
++export type RootState = ReturnType<AppStore["getState"]>;
++export type AppDispatch = AppStore["dispatch"];
+diff --git a/src/sections/addColumn.tsx b/src/sections/addColumn.tsx
+new file mode 100644
+index 0000000..c795f90
+--- /dev/null
++++ b/src/sections/addColumn.tsx
+@@ -0,0 +1,43 @@
++"use client";
++
++import { useState } from "react";
++import AddIcon from "@mui/icons-material/Add";
++import Button from "@/components/Button";
++import InlineInput from "@/components/InlineInput";
++import { useAppDispatch } from "@/redux/hooks";
++import { addColumn } from "@/redux/slices/userSlice";
++
++export default function AddColumn({ workSpaceId }: { workSpaceId: string }) {
++  const dispatch = useAppDispatch();
++  const [isAdding, setIsAdding] = useState(false);
++
++  if (isAdding) {
++    return (
++      <div className="w-72 shrink-0 space-y-2 rounded-xl border border-zinc-800 bg-zinc-900 p-3">
++        <InlineInput
++          ariaLabel="New column name"
++          placeholder="Column name"
++          onCommit={(title) => {
++            dispatch(addColumn({ workSpaceId, title }));
++            setIsAdding(false);
++          }}
++          onCancel={() => setIsAdding(false)}
++        />
++        <p className="text-xs text-zinc-500">
++          Press Enter to add, Escape to cancel.
++        </p>
++      </div>
++    );
++  }
++
++  return (
++    <Button
++      variant="secondary"
++      onClick={() => setIsAdding(true)}
++      className="h-11 w-72 shrink-0 justify-start border-dashed"
++    >
++      <AddIcon fontSize="small" />
++      Add column
++    </Button>
++  );
++}
+diff --git a/src/sections/boardToolbar.tsx b/src/sections/boardToolbar.tsx
+new file mode 100644
+index 0000000..6e53d12
+--- /dev/null
++++ b/src/sections/boardToolbar.tsx
+@@ -0,0 +1,68 @@
++"use client";
++
++import SearchIcon from "@mui/icons-material/Search";
++import CloseIcon from "@mui/icons-material/Close";
++import { useAppDispatch, useAppSelector } from "@/redux/hooks";
++import {
++  selectActiveColumns,
++  selectActiveTasks,
++  selectActiveWorkSpace,
++  selectSearchQuery,
++  setSearchQuery,
++} from "@/redux/slices/userSlice";
++
++function plural(count: number, word: string) {
++  return `${count} ${word}${count === 1 ? "" : "s"}`;
++}
++
++export default function BoardToolbar() {
++  const dispatch = useAppDispatch();
++  const workSpace = useAppSelector(selectActiveWorkSpace);
++  const columns = useAppSelector(selectActiveColumns);
++  const tasks = useAppSelector(selectActiveTasks);
++  const query = useAppSelector(selectSearchQuery);
++
++  if (!workSpace) return null;
++
++  return (
++    <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-zinc-800 bg-zinc-900/60 px-4 py-3">
++      <div className="min-w-0 flex-1">
++        <h1 className="truncate text-xl font-bold text-white">
++          {workSpace.title}
++        </h1>
++        <p className="text-xs text-zinc-400">
++          {plural(tasks.length, "task")} · {plural(columns.length, "column")}
++        </p>
++      </div>
++
++      <div className="relative w-full sm:w-72">
++        <label htmlFor="task-search" className="sr-only">
++          Search tasks on this board
++        </label>
++        <SearchIcon
++          fontSize="small"
++          className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500"
++        />
++        <input
++          id="task-search"
++          type="search"
++          value={query}
++          onChange={(event) => dispatch(setSearchQuery(event.target.value))}
++          placeholder="Search tasks or people…"
++          autoComplete="off"
++          className="field pl-9 pr-9 [&::-webkit-search-cancel-button]:hidden"
++        />
++        {query && (
++          <button
++            type="button"
++            onClick={() => dispatch(setSearchQuery(""))}
++            aria-label="Clear search"
++            className="icon-btn absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2"
++          >
++            <CloseIcon sx={{ fontSize: 16 }} />
++          </button>
++        )}
++      </div>
++    </div>
++  );
++}
+diff --git a/src/sections/column.tsx b/src/sections/column.tsx
+index 25bd579..a2930d8 100644
+--- a/src/sections/column.tsx
++++ b/src/sections/column.tsx
+@@ -1,235 +1,251 @@
+ "use client";
+ 
+-import React, { useEffect, useMemo, useRef, useState } from "react";
+-import MoreHorizIcon from "@mui/icons-material/MoreHoriz";
++import { memo, useEffect, useRef, useState } from "react";
+ import AddIcon from "@mui/icons-material/Add";
+-import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+-import CancelIcon from "@mui/icons-material/Cancel";
++import CloseIcon from "@mui/icons-material/Close";
++import DeleteIcon from "@mui/icons-material/Delete";
++import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
++import EditIcon from "@mui/icons-material/Edit";
+ import { motion } from "framer-motion";
+-
+-import { useAppDispatch, useAppSelector } from "@/redux/hooks";
+ import {
+-  addTask,
+-  changeNameColumn,
+-  deleteColumn,
+-  getStatusList,
+-} from "@/redux/slices/userSlice";
+-import Options from "@/components/options";
++  SortableContext,
++  useSortable,
++  verticalListSortingStrategy,
++} from "@dnd-kit/sortable";
+ import { CSS } from "@dnd-kit/utilities";
+-import DeleteIcon from "@mui/icons-material/Delete";
+-import Task from "@/sections/task";
+-import { SortableContext, useSortable } from "@dnd-kit/sortable";
+-
+-export default function Column({ column, tasks }: any) {
+-  const [taskInfo, setTaskInfo] = useState({
+-    description: "",
+-    workSpaceId: "",
+-    columnId: "",
+-    assignment: "",
+-    id: "",
+-    status: "backLog",
+-  });
+-  const [taskVlaue, setTaskValue] = useState("");
+-  const inputTask = useRef<any>(null);
+-  const [columnTitle, setColumnTitle] = useState<string>(column.title);
+-  const [isChangeColumnTitle, setIsChangeTitleColumn] = useState(false);
+-
+-  const tasksIds = useMemo(() => tasks?.map((i: any) => i.id), [tasks]);
++import Button from "@/components/Button";
++import ConfirmDialog from "@/components/ConfirmDialog";
++import InlineInput from "@/components/InlineInput";
++import Menu from "@/components/Menu";
++import { useAppDispatch } from "@/redux/hooks";
++import { addTask, deleteColumn, renameColumn } from "@/redux/slices/userSlice";
++import Task from "./task";
++import type { Column as ColumnType, Task as TaskType } from "@/types";
++
++interface ColumnProps {
++  column: ColumnType;
++  /** Tasks currently visible (after the search filter). */
++  tasks: TaskType[];
++  /** Number of tasks in the column regardless of the filter. */
++  totalCount: number;
++  isFiltering: boolean;
++}
+ 
+-  useEffect(() => {
+-    inputColumn.current?.focus();
+-  }, [isChangeColumnTitle]);
++function Column({ column, tasks, totalCount, isFiltering }: ColumnProps) {
++  const dispatch = useAppDispatch();
++  const [isRenaming, setIsRenaming] = useState(false);
++  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
++  const [isComposing, setIsComposing] = useState(false);
++  const [draft, setDraft] = useState("");
++  const listRef = useRef<HTMLDivElement>(null);
+ 
+   const {
+     setNodeRef,
++    setActivatorNodeRef,
+     attributes,
+     listeners,
+     transform,
+     transition,
+     isDragging,
+-  } = useSortable({
+-    id: column.id,
+-    data: { type: "Column", column },
+-  });
+-  const inputColumn = useRef<any>(null);
+-  const style = {
+-    transition,
+-    transform: CSS.Transform.toString(transform),
+-  };
+-
+-  const dispatch = useAppDispatch();
+-
+-  const [isAddTask, setIsAddTask] = useState(false);
+-  const [openOptions, setOpenOptions] = useState(false);
+-
+-  const options = [
+-    { name: "Delete column", func: handlerDeleteColumn, icon: <DeleteIcon /> },
+-  ];
+-
+-  function handlerCloseModal() {
+-    setTaskInfo((prev) => {
+-      return {
+-        ...prev,
+-        columnId: column.id,
+-        workSpaceId: column.workSpaceId,
+-      };
+-    });
+-    setIsAddTask(!isAddTask);
+-  }
+-
+-  function handlerCreateNewTask() {
+-    dispatch(addTask(taskInfo));
+-    handlerCloseModal();
+-  }
+-
+-  function handlerDeleteColumn() {
+-    dispatch(
+-      deleteColumn({ workSpaceId: "1c1h2", title: column.title, id: column.id })
+-    );
+-    handlerOpenOptions();
+-  }
+-
+-  function handlerIsChangeColumnTitle() {
+-    setIsChangeTitleColumn(!isChangeColumnTitle);
+-  }
++  } = useSortable({ id: column.id, data: { type: "Column" } });
+ 
+-  function handlerChangeColumnTitle(e: any) {
+-    const { value } = e.target;
++  // Keep the newest task in view while adding several in a row.
++  useEffect(() => {
++    if (isComposing) {
++      listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
++    }
++  }, [tasks.length, isComposing]);
+ 
+-    setColumnTitle(value);
++  function submitTask() {
++    const description = draft.trim();
++    if (!description) return;
+     dispatch(
+-      changeNameColumn({
++      addTask({
+         workSpaceId: column.workSpaceId,
+-        title: value,
+-        id: column.id,
++        columnId: column.id,
++        description,
+       })
+     );
++    setDraft("");
+   }
+ 
+-  function handlerKeyEnter(e: any) {
+-    if (e.key === "Enter") {
+-      e.preventDefault();
+-      dispatch(
+-        changeNameColumn({
+-          workSpaceId: "1c1h2",
+-          title: columnTitle,
+-          id: column.id,
+-        })
+-      );
+-      setIsChangeTitleColumn(false);
+-    }
+-  }
+-
+-  function handlerOpenOptions() {
+-    setOpenOptions(!openOptions);
+-  }
+-
+-  if (isDragging) {
+-    return (
+-      <div className="bg-white/10 opacity-35 w-[275px] rounded-lg p-3 relative h-full border-[1px] border-white/30"></div>
+-    );
++  function closeComposer() {
++    setIsComposing(false);
++    setDraft("");
+   }
+ 
+   return (
+-    <div ref={setNodeRef} style={style} key={column.id}>
+-      <motion.div
+-        initial={{ scale: 0, rotate: 90 }}
+-        animate={{ rotate: 0, scale: 1 }}
+-        transition={{
+-          duration: 0.3,
+-          stiffness: 260,
+-          damping: 20,
+-        }}
+-        className="min-w-[250px] bg-zinc-900 shadow-2xl shadow-purple-900/60 rounded-xl p-5 h-fit relative transition-all duration-150 max-w-[300px]"
++    <>
++      <div
++        ref={setNodeRef}
++        style={{ transform: CSS.Transform.toString(transform), transition }}
++        className={`flex max-h-full w-72 shrink-0 ${isDragging ? "opacity-30" : ""}`}
+       >
+-        <div
+-          {...attributes}
+-          {...listeners}
+-          className="flex items-center gap-x-2 border-b-[1px] border-purple-600 pb-5 mb-3"
++        <motion.section
++          initial={{ opacity: 0, y: 8 }}
++          animate={{ opacity: 1, y: 0 }}
++          transition={{ duration: 0.2 }}
++          aria-label={`Column ${column.title}`}
++          className="flex max-h-full w-full flex-col rounded-xl border border-zinc-800 bg-zinc-900 shadow-lg shadow-purple-950/30"
+         >
+-          {!isChangeColumnTitle ? (
+-            <h2
+-              onClick={handlerIsChangeColumnTitle}
+-              className="text-lg text-white text-center font-semibold flex-1 cursor-pointer"
++          <header className="flex items-center gap-1 border-b border-zinc-800 p-2">
++            <button
++              ref={setActivatorNodeRef}
++              {...attributes}
++              {...listeners}
++              type="button"
++              aria-label={`Reorder column ${column.title}`}
++              className="icon-btn cursor-grab touch-none active:cursor-grabbing"
+             >
+-              {columnTitle ? columnTitle : "not name"}
+-            </h2>
+-          ) : (
+-            <input
+-              onChange={handlerChangeColumnTitle}
+-              onKeyDown={handlerKeyEnter}
+-              value={columnTitle}
+-              type="text"
+-              className="bg-black/40 text-white rounded-md py-2 px-3 max-w-[150px]"
+-            />
+-          )}
+-          <span
+-            onClick={handlerOpenOptions}
+-            className="rounded-full cursor-pointer px-0.5 active:bg-white/50"
+-          >
+-            <MoreHorizIcon />
+-          </span>
+-        </div>
+-        <div className="grid gap-5 pt-5 px-2 justify-center w-[250px] max-h-[500px] overflow-y-auto overflow-x-hidden max-w-[300px]">
+-          {tasks?.map(
+-            (i: any) =>
+-              i.columnId === column.id &&
+-              i.workSpaceId === column.workSpaceId && (
+-                <SortableContext items={tasksIds} key={i.id}>
+-                  <Task task={i} workId={column.workSpaceId} />
+-                </SortableContext>
+-              )
+-          )}
+-          {isAddTask && (
+-            <p className="flex gap-3 items-center justify-between break-words">
+-              <input
+-                value={taskVlaue}
+-                onKeyDown={(e) => {
+-                  if (e.key === "Enter") {
+-                    handlerCreateNewTask();
+-                    setTaskValue("");
+-                  }
++              <DragIndicatorIcon fontSize="small" />
++            </button>
++
++            {isRenaming ? (
++              <InlineInput
++                initialValue={column.title}
++                ariaLabel="Column name"
++                className="min-w-0 flex-1"
++                onCommit={(title) => {
++                  dispatch(renameColumn({ id: column.id, title }));
++                  setIsRenaming(false);
+                 }}
+-                ref={inputTask}
+-                onChange={(e) => {
+-                  setTaskValue(e.target.value);
+-                  setTaskInfo((prev) => {
+-                    return { ...prev, description: e.target.value };
+-                  });
+-                }}
+-                className="flex-1 bg-zinc-800 border-l-2 border-purple-500 p-2 rounded-r-md outline-none w-5/6"
++                onCancel={() => setIsRenaming(false)}
+               />
+-              {taskVlaue ? (
+-                <span onClick={handlerCreateNewTask}>
+-                  <CheckCircleIcon />
+-                </span>
+-              ) : (
+-                <span
+-                  onClick={() => setIsAddTask(false)}
+-                  className="cursor-pointer"
++            ) : (
++              <h2 className="min-w-0 flex-1">
++                <button
++                  type="button"
++                  onClick={() => setIsRenaming(true)}
++                  title="Click to rename"
++                  className="w-full truncate rounded px-1 py-1 text-left font-semibold text-white transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
+                 >
+-                  <CancelIcon />
+-                </span>
+-              )}
+-            </p>
+-          )}
+-          <button
+-            onClick={handlerCloseModal}
+-            className="text-center bg-purple-500 rounded-lg w-fit h-10 p-2 flex font-semibold items-center justify-center text-black active:bg-white my-5 mx-auto gap-2 active:bg-white/50 transition-all duration-200"
+-          >
+-            <span className="flex items-center justify-center rounded-full bg-purple-300">
+-              <AddIcon
+-                fontSize="small"
+-                style={{
+-                  color: "black",
+-                }}
+-              />
++                  {column.title}
++                </button>
++              </h2>
++            )}
++
++            <span
++              className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs font-medium tabular-nums text-zinc-300"
++              aria-label={`${totalCount} tasks`}
++            >
++              {isFiltering ? `${tasks.length}/${totalCount}` : totalCount}
+             </span>
+-            <h2>Add Task</h2>
+-          </button>
+-          <Options show={openOptions} items={options} />
+-        </div>
+-      </motion.div>
+-    </div>
++
++            <Menu
++              label={`Options for column ${column.title}`}
++              items={[
++                {
++                  label: "Rename column",
++                  icon: <EditIcon fontSize="small" />,
++                  onSelect: () => setIsRenaming(true),
++                },
++                {
++                  label: "Delete column",
++                  icon: <DeleteIcon fontSize="small" />,
++                  danger: true,
++                  onSelect: () => setIsConfirmingDelete(true),
++                },
++              ]}
++            />
++          </header>
++
++          <div
++            ref={listRef}
++            className="min-h-16 flex-1 space-y-2 overflow-y-auto p-2"
++          >
++            <SortableContext
++              items={tasks.map((task) => task.id)}
++              strategy={verticalListSortingStrategy}
++            >
++              {tasks.map((task) => (
++                <Task key={task.id} task={task} />
++              ))}
++            </SortableContext>
++            {tasks.length === 0 && !isComposing && (
++              <p className="rounded-lg border border-dashed border-zinc-700 px-3 py-4 text-center text-xs text-zinc-500">
++                {isFiltering && totalCount > 0
++                  ? "No matching tasks"
++                  : "No tasks yet. Add one or drop a task here."}
++              </p>
++            )}
++          </div>
++
++          <footer className="border-t border-zinc-800 p-2">
++            {isComposing ? (
++              <div className="space-y-2">
++                <textarea
++                  autoFocus
++                  rows={2}
++                  maxLength={280}
++                  value={draft}
++                  aria-label={`New task in ${column.title}`}
++                  placeholder="What needs to be done?"
++                  onChange={(event) => setDraft(event.target.value)}
++                  onKeyDown={(event) => {
++                    if (event.key === "Enter" && !event.shiftKey) {
++                      event.preventDefault();
++                      submitTask();
++                    } else if (event.key === "Escape") {
++                      closeComposer();
++                    }
++                  }}
++                  className="field resize-none"
++                />
++                <div className="flex items-center gap-2">
++                  <Button
++                    onClick={submitTask}
++                    disabled={!draft.trim()}
++                    className="px-3 py-1.5"
++                  >
++                    Add task
++                  </Button>
++                  <button
++                    type="button"
++                    onClick={closeComposer}
++                    className="icon-btn"
++                    aria-label="Cancel adding task"
++                  >
++                    <CloseIcon fontSize="small" />
++                  </button>
++                  <span className="ml-auto text-xs text-zinc-500">
++                    Enter to add
++                  </span>
++                </div>
++              </div>
++            ) : (
++              <button
++                type="button"
++                onClick={() => setIsComposing(true)}
++                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium text-zinc-300 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
++              >
++                <AddIcon fontSize="small" />
++                Add task
++              </button>
++            )}
++          </footer>
++        </motion.section>
++      </div>
++
++      <ConfirmDialog
++        open={isConfirmingDelete}
++        title={`Delete "${column.title}"?`}
++        message={
++          totalCount > 0
++            ? `This column and its ${totalCount} ${
++                totalCount === 1 ? "task" : "tasks"
++              } will be permanently removed.`
++            : "This empty column will be removed."
++        }
++        confirmLabel="Delete column"
++        destructive
++        onCancel={() => setIsConfirmingDelete(false)}
++        onConfirm={() => {
++          setIsConfirmingDelete(false);
++          dispatch(deleteColumn(column.id));
++        }}
++      />
++    </>
+   );
+ }
++
++export default memo(Column);
+diff --git a/src/sections/createColumn.tsx b/src/sections/createColumn.tsx
+deleted file mode 100644
+index 619b857..0000000
+--- a/src/sections/createColumn.tsx
++++ /dev/null
+@@ -1,37 +0,0 @@
+-"use client";
+-
+-import Button from "@/components/Button";
+-import { useAppDispatch } from "@/redux/hooks";
+-import { addFirstColumn } from "@/redux/slices/userSlice";
+-import React, { useState } from "react";
+-
+-export default function CreateColumn({ id }: { id: string }) {
+-  const [culomnInfo, setColumnInfo] = useState({ title: "", workSpaceId: "" });
+-
+-  const dispatch = useAppDispatch();
+-
+-  function handleChnageName(e: any) {
+-    const { value } = e.target;
+-    setColumnInfo((prev) => {
+-      return { ...prev, title: value, workSpaceId: id };
+-    });
+-  }
+-
+-  function handleCreateColumn() {
+-    if (culomnInfo.title) {
+-      dispatch(addFirstColumn(culomnInfo));
+-    }
+-  }
+-
+-  return (
+-    <div className="bg-zinc-800 rounded-md grid justify-center items-center p-5 gap-5 h-fit w-fit">
+-      <h2 className="text-center text-xl font-semibold">Add a column</h2>
+-      <input
+-        value={culomnInfo.title}
+-        onChange={handleChnageName}
+-        className="bg-black/30 rounded-md text-white p-2 outline-none"
+-      />
+-      <Button title={"Create"} onClick={handleCreateColumn} />
+-    </div>
+-  );
+-}
+diff --git a/src/sections/editTask.tsx b/src/sections/editTask.tsx
+new file mode 100644
+index 0000000..68a79de
+--- /dev/null
++++ b/src/sections/editTask.tsx
+@@ -0,0 +1,167 @@
++"use client";
++
++import { useId, useState } from "react";
++import CloseIcon from "@mui/icons-material/Close";
++import Avatar from "@/components/Avatar";
++import Button from "@/components/Button";
++import Modal from "@/components/Modal";
++import { useAppDispatch } from "@/redux/hooks";
++import { editTask } from "@/redux/slices/userSlice";
++import type { Task } from "@/types";
++
++const MAX_DESCRIPTION = 280;
++
++interface EditTaskProps {
++  task: Task;
++  onClose: () => void;
++}
++
++/** Mount only while open, so the draft always starts from the saved task. */
++export default function EditTask({ task, onClose }: EditTaskProps) {
++  const dispatch = useAppDispatch();
++  const formId = useId();
++  const [description, setDescription] = useState(task.description);
++  const [assignees, setAssignees] = useState<string[]>(task.assignees);
++  const [pendingUser, setPendingUser] = useState("");
++
++  const isValid = description.trim().length > 0;
++
++  function addPendingUser(current: string[]): string[] {
++    const name = pendingUser.trim();
++    if (!name) return current;
++    if (current.some((a) => a.toLowerCase() === name.toLowerCase())) {
++      return current;
++    }
++    return [...current, name];
++  }
++
++  function handleAddUser() {
++    setAssignees((current) => addPendingUser(current));
++    setPendingUser("");
++  }
++
++  function handleSubmit(event?: React.FormEvent) {
++    event?.preventDefault();
++    if (!isValid) return;
++    dispatch(
++      editTask({
++        id: task.id,
++        description,
++        // Include a name that was typed but not confirmed with Enter yet.
++        assignees: addPendingUser(assignees),
++      })
++    );
++    onClose();
++  }
++
++  return (
++    <Modal
++      open
++      title="Task details"
++      onClose={onClose}
++      footer={
++        <>
++          <Button variant="ghost" onClick={onClose}>
++            Cancel
++          </Button>
++          <Button type="submit" form={formId} disabled={!isValid}>
++            Save changes
++          </Button>
++        </>
++      }
++    >
++      <form id={formId} onSubmit={handleSubmit} className="space-y-6">
++        <div className="space-y-2">
++          <label
++            htmlFor={`${formId}-description`}
++            className="text-sm font-semibold text-zinc-200"
++          >
++            Description
++          </label>
++          <textarea
++            id={`${formId}-description`}
++            data-autofocus
++            rows={4}
++            maxLength={MAX_DESCRIPTION}
++            value={description}
++            onChange={(event) => setDescription(event.target.value)}
++            onKeyDown={(event) => {
++              if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
++                handleSubmit();
++              }
++            }}
++            aria-invalid={!isValid}
++            className="field resize-none"
++          />
++          <div className="flex justify-between text-xs text-zinc-500">
++            <span className={isValid ? "" : "text-red-400"}>
++              {isValid ? "Ctrl/⌘ + Enter to save" : "Description is required"}
++            </span>
++            <span>
++              {description.length}/{MAX_DESCRIPTION}
++            </span>
++          </div>
++        </div>
++
++        <div className="space-y-2">
++          <label
++            htmlFor={`${formId}-assignee`}
++            className="text-sm font-semibold text-zinc-200"
++          >
++            Assigned to
++          </label>
++          {assignees.length > 0 ? (
++            <ul className="flex flex-wrap gap-2">
++              {assignees.map((name) => (
++                <li
++                  key={name}
++                  className="flex items-center gap-2 rounded-full bg-zinc-800 py-1 pl-1 pr-2 text-sm"
++                >
++                  <Avatar name={name} size="sm" />
++                  {name}
++                  <button
++                    type="button"
++                    onClick={() =>
++                      setAssignees((current) =>
++                        current.filter((a) => a !== name)
++                      )
++                    }
++                    aria-label={`Remove ${name}`}
++                    className="rounded-full text-zinc-400 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
++                  >
++                    <CloseIcon sx={{ fontSize: 16 }} />
++                  </button>
++                </li>
++              ))}
++            </ul>
++          ) : (
++            <p className="text-sm text-zinc-500">Not assigned to anyone.</p>
++          )}
++          <div className="flex gap-2">
++            <input
++              id={`${formId}-assignee`}
++              value={pendingUser}
++              maxLength={30}
++              placeholder="Add a person and press Enter"
++              onChange={(event) => setPendingUser(event.target.value)}
++              onKeyDown={(event) => {
++                if (event.key === "Enter" || event.key === ",") {
++                  event.preventDefault();
++                  handleAddUser();
++                }
++              }}
++              className="field"
++            />
++            <Button
++              variant="secondary"
++              onClick={handleAddUser}
++              disabled={!pendingUser.trim()}
++            >
++              Add
++            </Button>
++          </div>
++        </div>
++      </form>
++    </Modal>
++  );
++}
+diff --git a/src/sections/eidtTask.tsx b/src/sections/eidtTask.tsx
+deleted file mode 100644
+index 61456ac..0000000
+--- a/src/sections/eidtTask.tsx
++++ /dev/null
+@@ -1,137 +0,0 @@
+-"use client";
+-
+-import React, { useState } from "react";
+-import CancelIcon from "@mui/icons-material/Cancel";
+-import CloseIcon from "@mui/icons-material/Close";
+-import { motion } from "framer-motion";
+-import { useAppDispatch } from "@/redux/hooks";
+-import { editTask } from "@/redux/slices/userSlice";
+-
+-export default function EidtTask({ task, handlerOpenEditTaskModal }: any) {
+-  const [user, setUser] = useState("");
+-  const [taskInfo, setTaskInfo] = useState({
+-    id: task.id,
+-    description: task.description || "",
+-    assignment: task.assignment || null,
+-  });
+-
+-  const dispatch = useAppDispatch();
+-
+-  function handlerChange(e: any) {
+-    const { value, name } = e.target;
+-    setTaskInfo((prev: any) => {
+-      return { ...prev, [name]: value };
+-    });
+-  }
+-
+-  function submitChanges(e: any) {
+-    if (e.key === "Enter") {
+-      e.preventDefault();
+-      dispatch(editTask(taskInfo));
+-      handlerOpenEditTaskModal();
+-    }
+-  }
+-
+-  function deleteUserFromAssignment(name: string) {
+-    const arr = task.assignment;
+-    const assignment = arr.filter((i: string) => i !== name);
+-    dispatch(
+-      editTask({
+-        id: task.id,
+-        description: task.description,
+-        assignment: assignment,
+-      })
+-    );
+-  }
+-
+-  function addUserToAssignment(e: any) {
+-    if (e.key === "Enter" && user !== "") {
+-      e.preventDefault();
+-      let arr = [...task.assignment];
+-
+-      arr.push(user);
+-
+-      dispatch(
+-        editTask({
+-          id: task.id,
+-          description: task.description,
+-          assignment: arr,
+-        })
+-      );
+-
+-      setUser("");
+-    }
+-  }
+-
+-  return (
+-    <section className="fixed w-full h-full top-0 left-0 bg-black/20 z-50 flex items-center justify-center">
+-      <motion.div
+-        initial={{ scale: 0, opacity: 0 }}
+-        animate={{ scale: 1, opacity: 1 }}
+-        transition={{
+-          duration: 0.3,
+-          stiffness: 360,
+-          damping: 50,
+-        }}
+-        className="w-3/6 h-5/6 bg-zinc-900 rounded-r-md shadow-2xl shadow-purple-500/10 border-l-2 border-purple-700 p-10 space-y-10 overflow-y-auto"
+-      >
+-        <div className="w-full flex justify-between items-center">
+-          <h2 className="text-2xl font-semibold border-b-2 border-purple-700 pb-3 w-fit">
+-            Task Info
+-          </h2>
+-          <span
+-            onClick={handlerOpenEditTaskModal}
+-            className="active:bg-white/30 rounded-full flex- items-center p-2 cursor-pointer"
+-          >
+-            <CloseIcon />
+-          </span>
+-        </div>
+-        <div className="space-y-10">
+-          <div className="">
+-            <div>
+-              <h2 className="text-lg font-semibold">Task Description:</h2>
+-              <div className="bg-gradient-to-r mt-3 from-purple-700 to-purple-950/0 w-full h-1 rounded-full"></div>
+-            </div>
+-            <textarea
+-              name="description"
+-              onChange={handlerChange}
+-              onKeyDown={submitChanges}
+-              className="w-5/6 bg-zinc-800 rounded-md h-[150px] max-h-[150px] p-5 my-4"
+-              value={taskInfo.description}
+-            />
+-          </div>
+-          <div className="">
+-            <div>
+-              <h2 className="text-lg font-semibold">Assigned to:</h2>
+-              <div className="bg-gradient-to-r from-purple-700 to-purple-950/0 w-full mt-3 h-1 rounded-full"></div>
+-            </div>{" "}
+-            <p className="my-4 flex items-center gap-4 flex-wrap ">
+-              {task?.assignment?.length > 0 ? (
+-                task?.assignment?.map((i: any) => (
+-                  <span
+-                    onClick={() => deleteUserFromAssignment(i)}
+-                    key={task.id}
+-                    className="bg-zinc-800 font-medium text-md p-2 rounded-md flex gap-2 w-fit items-center  "
+-                  >
+-                    {i}
+-                    <CancelIcon />
+-                  </span>
+-                ))
+-              ) : (
+-                <h2>Not assigned to anyone</h2>
+-              )}
+-              <input
+-                value={user}
+-                placeholder="Add user"
+-                onKeyDown={addUserToAssignment}
+-                onChange={(e: any) => setUser(e.target.value)}
+-                type="text"
+-                className="bg-zinc-800 font-medium text-md p-2 rounded-md flex gap-2 w-fit items-center min-w-[120px]"
+-              />
+-            </p>
+-          </div>
+-        </div>
+-      </motion.div>
+-    </section>
+-  );
+-}
+diff --git a/src/sections/header.tsx b/src/sections/header.tsx
+index 0c7e91c..7dc908f 100644
+--- a/src/sections/header.tsx
++++ b/src/sections/header.tsx
+@@ -1,25 +1,39 @@
+-import React from "react";
++"use client";
++
++import DashboardIcon from "@mui/icons-material/Dashboard";
+ import LogoutIcon from "@mui/icons-material/Logout";
++import Avatar from "@/components/Avatar";
+ import { useAppDispatch, useAppSelector } from "@/redux/hooks";
+-import { changeAuth, getAuth } from "@/redux/slices/userSlice";
++import { selectUser, signOut } from "@/redux/slices/userSlice";
++
++function capitalize(value: string) {
++  return value.charAt(0).toUpperCase() + value.slice(1);
++}
+ 
+ export default function Header() {
+-  const auth = useAppSelector(getAuth);
+   const dispatch = useAppDispatch();
++  const user = useAppSelector(selectUser);
++  const fullName = `${capitalize(user.name)} ${capitalize(user.lastName)}`;
+ 
+-  function handleLogout() {
+-    dispatch(changeAuth(false));
+-  }
+   return (
+-    <div className="px-4 text-xl py-2 bg-gradient-to-r from-purple-800 via-purple-950 to-purple-950/40 font-bold flex">
+-      <h2 className="flex-1">Issuse | Tracker App</h2>
+-      <div className="flex items-center">
+-        <div className="bg-white h-8 w-8 rounded-lg"></div>
+-        <h2 className="pl-2 text-base font-medium min-w-28">User Test</h2>
+-        <span className="rounded-full p-1 bg-transparent active:bg-white/20 cursor-pointer">
+-          <LogoutIcon onClick={handleLogout} />
+-        </span>
++    <header className="flex items-center gap-3 border-b border-purple-900/60 bg-gradient-to-r from-purple-900 via-purple-950 to-zinc-950 px-4 py-2">
++      <DashboardIcon className="text-purple-300" />
++      <p className="flex-1 truncate text-lg font-bold tracking-tight">
++        Issue Tracker
++      </p>
++      <div className="flex items-center gap-2">
++        <Avatar name={fullName} />
++        <span className="hidden text-sm font-medium sm:block">{fullName}</span>
++        <button
++          type="button"
++          onClick={() => dispatch(signOut())}
++          className="icon-btn"
++          aria-label="Log out"
++          title="Log out"
++        >
++          <LogoutIcon fontSize="small" />
++        </button>
+       </div>
+-    </div>
++    </header>
+   );
+ }
+diff --git a/src/sections/sideBar.tsx b/src/sections/sideBar.tsx
+index 9add3b3..71c0c56 100644
+--- a/src/sections/sideBar.tsx
++++ b/src/sections/sideBar.tsx
+@@ -1,228 +1,241 @@
+ "use client";
+ 
+-import EditIcon from "@mui/icons-material/Edit";
+-import DeleteIcon from "@mui/icons-material/Delete";
+-import { motion } from "framer-motion";
++import { useEffect, useMemo, useState } from "react";
+ import AddIcon from "@mui/icons-material/Add";
+-import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+-import CancelIcon from "@mui/icons-material/Cancel";
+-import FormatListBulletedIcon from "@mui/icons-material/FormatListBulleted";
+-import { ArrowRight } from "@mui/icons-material";
+-import StarOutlineIcon from "@mui/icons-material/StarOutline";
++import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
++import ChevronRightIcon from "@mui/icons-material/ChevronRight";
++import DeleteIcon from "@mui/icons-material/Delete";
++import EditIcon from "@mui/icons-material/Edit";
+ import StarIcon from "@mui/icons-material/Star";
++import StarOutlineIcon from "@mui/icons-material/StarOutline";
++import ConfirmDialog from "@/components/ConfirmDialog";
++import InlineInput from "@/components/InlineInput";
+ import { useAppDispatch, useAppSelector } from "@/redux/hooks";
+-import { useEffect, useRef, useState } from "react";
+ import {
+-  addNewWorkSpace,
+-  changeWorkSpaceName,
++  addWorkSpace,
+   deleteWorkSpace,
+-  getWorkSpaceId,
++  renameWorkSpace,
++  selectActiveWorkSpaceId,
+   selectWorkSpace,
+   selectWorkSpaces,
+   toggleFavorite,
+ } from "@/redux/slices/userSlice";
++import type { Workspace } from "@/types";
+ 
+-export default function SideBar() {
+-  const [nameWorkSpace, setNameWorkSpace] = useState({ title: "", id: "" });
+-  const [openSideBar, setOpentSideBar] = useState(false);
+-  const [show, setShow] = useState(false);
+-  const [edit, setEdit] = useState(false);
+-  const inputBoard = useRef<any>(null);
+-
+-  const workSpaces = useAppSelector(selectWorkSpaces);
+-  const workSpaceId = useAppSelector(getWorkSpaceId);
+-  const workSpacesSorted = [...workSpaces].sort((a, b) =>
+-    a.isFovrite === b.isFovrite ? 0 : a.isFovrite ? -1 : 1
+-  );
+-
+-  useEffect(() => {
+-    if (inputBoard.current) {
+-      inputBoard.current?.focus();
+-    }
+-  }, [show, edit]);
++const rowAction =
++  "icon-btn h-7 w-7 opacity-0 focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100";
+ 
++export default function SideBar() {
+   const dispatch = useAppDispatch();
++  const workSpaces = useAppSelector(selectWorkSpaces);
++  const activeId = useAppSelector(selectActiveWorkSpaceId);
+ 
+-  function handlerCreateWorkSpace() {
+-    dispatch(addNewWorkSpace(nameWorkSpace.title));
+-    setNameWorkSpace({ title: "", id: "" });
+-    setShow(!show);
+-  }
+-
+-  function handlerOpenSideBar() {
+-    setOpentSideBar(!openSideBar);
+-  }
+-
+-  function handleToggleFovrite(id: string) {
+-    dispatch(toggleFavorite(id));
+-  }
+-
+-  function handleDelete(id: string) {
+-    dispatch(deleteWorkSpace(id));
+-  }
+-
+-  function handleChnageWorkSpaceTitle(e: any, id: string) {
+-    const { value } = e.target;
+-    setNameWorkSpace((prev) => {
+-      return { ...prev, id: id, title: value };
+-    });
+-  }
+-
+-  function handleEditWorkSpace(idWorkSpace: string) {
+-    setEdit(!edit);
+-    setNameWorkSpace((prevState) => ({
+-      ...prevState,
+-      id: prevState.id === idWorkSpace ? "" : idWorkSpace,
+-    }));
+-  }
+-
+-  function updateWorkSpace(e: any) {
+-    if (e.key === "Enter") {
+-      dispatch(changeWorkSpaceName(nameWorkSpace));
+-      setNameWorkSpace({ title: "", id: "" });
+-    }
+-  }
+-
+-  function onCloseModal() {
+-    setShow(!show);
+-    inputBoard.current?.focus();
+-  }
++  const [collapsed, setCollapsed] = useState(false);
++  const [renamingId, setRenamingId] = useState<string | null>(null);
++  const [isCreating, setIsCreating] = useState(false);
++  const [pendingDelete, setPendingDelete] = useState<Workspace | null>(null);
+ 
+-  function handlerChange(e: any) {
+-    const { value } = e.target;
+-    setNameWorkSpace({ title: value, id: "" });
+-  }
++  // Start collapsed on small screens so the board gets the space.
++  useEffect(() => {
++    if (window.matchMedia("(max-width: 767px)").matches) setCollapsed(true);
++  }, []);
++
++  // Favourites first; Array.sort is stable so the rest keep their order.
++  const sorted = useMemo(
++    () =>
++      [...workSpaces].sort(
++        (a, b) => Number(b.isFavorite) - Number(a.isFavorite)
++      ),
++    [workSpaces]
++  );
+ 
+-  function handleSelectWorkSpace(id: string) {
+-    dispatch(selectWorkSpace(id));
+-  }
++  const toggle = (
++    <button
++      type="button"
++      onClick={() => setCollapsed((value) => !value)}
++      className="icon-btn"
++      aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
++      aria-expanded={!collapsed}
++    >
++      {collapsed ? <ChevronRightIcon /> : <ChevronLeftIcon />}
++    </button>
++  );
+ 
+   return (
+     <>
+-      <motion.aside
+-        initial={{ x: -200 }}
+-        animate={{ x: 0 }}
+-        transition={{
+-          duration: 0.3,
+-          stiffness: 360,
+-          damping: 50,
+-        }}
+-        style={{ height: "calc(100vh - 150px)" }}
+-        className={`p-5 m-3 bg-zinc-900 rounded-md h-full shadow-xl shadow-purple-600/20 ${
+-          openSideBar ? "w-[20px]" : "w-[300px]"
+-        } transition-all duration-200 relative`}
++      <aside
++        aria-label="Boards"
++        className={`flex shrink-0 flex-col border-r border-zinc-800 bg-zinc-900/60 transition-[width] duration-200 ${
++          collapsed ? "w-14" : "w-64"
++        }`}
+       >
+-        <div
+-          onClick={handlerOpenSideBar}
+-          className="bg-black w-fit absolute top-1/2 -translate-y-1/2 -right-3"
+-        >
+-          <span
+-            style={{
+-              transform: `rotate(${openSideBar ? "0" : "-180deg"})`,
+-              transition: "transform ease-in-out .5s",
+-            }}
+-            className="flex items-center justify-center border-2 border-white w-fit rounded-full opacity-65 hover:opacity-100 cursor-pointer"
+-          >
+-            <ArrowRight />
+-          </span>
+-        </div>
+-        {!openSideBar && (
++        {collapsed ? (
++          <nav className="flex flex-1 flex-col items-center gap-2 overflow-y-auto py-3">
++            {toggle}
++            {sorted.map((workSpace) => (
++              <button
++                key={workSpace.id}
++                type="button"
++                title={workSpace.title}
++                aria-label={`Open board ${workSpace.title}`}
++                aria-current={workSpace.id === activeId ? "page" : undefined}
++                onClick={() => dispatch(selectWorkSpace(workSpace.id))}
++                className={`flex h-9 w-9 items-center justify-center rounded-lg text-sm font-bold uppercase transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 ${
++                  workSpace.id === activeId
++                    ? "bg-purple-600 text-white"
++                    : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
++                }`}
++              >
++                {workSpace.title.charAt(0)}
++              </button>
++            ))}
++            <button
++              type="button"
++              onClick={() => {
++                setCollapsed(false);
++                setIsCreating(true);
++              }}
++              className="icon-btn"
++              aria-label="New board"
++            >
++              <AddIcon fontSize="small" />
++            </button>
++          </nav>
++        ) : (
+           <>
+-            <div className="mb-5">
+-              <h2 className="font-bold text-xl py-5 flex justify-between items-center w-[250px]">
+-                Your Boards
+-                <FormatListBulletedIcon />
++            <div className="flex items-center justify-between border-b border-zinc-800 py-3 pl-4 pr-2">
++              <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">
++                Your boards
+               </h2>
+-              <div className="bg-gradient-to-r from-purple-700 to-purple-950/0 w-full h-[2px] rounded-full"></div>
++              {toggle}
+             </div>
+-            <ul className="text-lg space-y-4 overflow-y-auto h-full">
+-              {workSpacesSorted.map((i) => (
+-                <motion.li
+-                  initial={{ x: -80, opacity: 0 }}
+-                  animate={{ x: 0, opacity: 1 }}
+-                  transition={{
+-                    duration: 0.1,
+-                    damping: 50,
+-                  }}
+-                  key={i.id}
+-                  style={{
+-                    borderLeft: i.id === workSpaceId ? "solid 2px #9333ea" : "",
+-                    background: i.id === workSpaceId ? "#3f3f3fc2" : "",
+-                  }}
+-                  className="p-2 cursor-pointer transition-all duration-200 rounded-r-md hover:bg-white/30"
+-                >
+-                  <div className="flex items-center">
+-                    {i.id !== nameWorkSpace.id ? (
+-                      <h2
+-                        className="flex-1"
+-                        onClick={() => handleSelectWorkSpace(i.id)}
+-                      >
+-                        {i.title.toUpperCase()}
+-                      </h2>
+-                    ) : (
+-                      <input
+-                        ref={inputBoard}
+-                        onChange={(e: any) =>
+-                          handleChnageWorkSpaceTitle(e, i.id)
+-                        }
+-                        onKeyDown={updateWorkSpace}
+-                        type="text"
+-                        className="bg-white/10 text-white rounded-md py-2 px-3 mr-2 w-5/6"
+-                      />
+-                    )}
+-                    <span onClick={() => handleToggleFovrite(i.id)}>
+-                      {!i.isFovrite ? <StarOutlineIcon /> : <StarIcon />}
+-                    </span>
+-                    <span>
+-                      <EditIcon onClick={() => handleEditWorkSpace(i.id)} />
+-                    </span>
+-                    <span>
+-                      <DeleteIcon onClick={() => handleDelete(i.id)} />
+-                    </span>
+-                  </div>
+-                </motion.li>
+-              ))}
+-              {show && (
+-                <li className="p-2 cursor-pointer transition-all duration-200 rounded-r-md w-full">
+-                  <div className="flex">
+-                    <input
+-                      ref={inputBoard}
+-                      value={nameWorkSpace.title}
+-                      onKeyDown={(e) => {
+-                        if (e.key === "Enter") {
+-                          handlerCreateWorkSpace();
+-                        }
+-                      }}
+-                      onChange={(e: any) => handleChnageWorkSpaceTitle(e, "")}
+-                      placeholder="Board Name"
+-                      type="text"
+-                      className="bg-white/10 text-white rounded-md py-2 px-3 mr-2 w-5/6 placeholder:text-sm"
+-                    />
+-                    <span
+-                      onClick={handlerCreateWorkSpace}
+-                      className="active:bg-white/30 rounded-full w-fit px-2 flex items-center justify-center gap-3"
+-                    >
+-                      <CheckCircleIcon />
+-                    </span>
+-                    <span
+-                      onClick={onCloseModal}
+-                      className="active:bg-white/30 rounded-full w-fit px-2 flex items-center justify-center gap-3"
++
++            <nav className="flex-1 overflow-y-auto p-2">
++              <ul className="space-y-1">
++                {sorted.map((workSpace) => {
++                  const isActive = workSpace.id === activeId;
++                  return (
++                    <li
++                      key={workSpace.id}
++                      className={`group flex items-center gap-0.5 rounded-md border-l-2 py-1 pl-2 pr-1 transition-colors ${
++                        isActive
++                          ? "border-purple-500 bg-white/10"
++                          : "border-transparent hover:bg-white/5"
++                      }`}
+                     >
+-                      <CancelIcon />
+-                    </span>
+-                  </div>
+-                </li>
++                      {renamingId === workSpace.id ? (
++                        <InlineInput
++                          initialValue={workSpace.title}
++                          ariaLabel="Board name"
++                          className="min-w-0 flex-1"
++                          onCommit={(title) => {
++                            dispatch(
++                              renameWorkSpace({ id: workSpace.id, title })
++                            );
++                            setRenamingId(null);
++                          }}
++                          onCancel={() => setRenamingId(null)}
++                        />
++                      ) : (
++                        <button
++                          type="button"
++                          onClick={() =>
++                            dispatch(selectWorkSpace(workSpace.id))
++                          }
++                          aria-current={isActive ? "page" : undefined}
++                          className="min-w-0 flex-1 truncate rounded py-1.5 text-left text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
++                        >
++                          {workSpace.title}
++                        </button>
++                      )}
++                      <button
++                        type="button"
++                        onClick={() => dispatch(toggleFavorite(workSpace.id))}
++                        aria-pressed={workSpace.isFavorite}
++                        aria-label={
++                          workSpace.isFavorite
++                            ? `Remove ${workSpace.title} from favorites`
++                            : `Add ${workSpace.title} to favorites`
++                        }
++                        className={`icon-btn h-7 w-7 ${
++                          workSpace.isFavorite ? "text-amber-400" : ""
++                        }`}
++                      >
++                        {workSpace.isFavorite ? (
++                          <StarIcon fontSize="small" />
++                        ) : (
++                          <StarOutlineIcon fontSize="small" />
++                        )}
++                      </button>
++                      <button
++                        type="button"
++                        onClick={() => setRenamingId(workSpace.id)}
++                        aria-label={`Rename board ${workSpace.title}`}
++                        className={rowAction}
++                      >
++                        <EditIcon sx={{ fontSize: 16 }} />
++                      </button>
++                      <button
++                        type="button"
++                        onClick={() => setPendingDelete(workSpace)}
++                        aria-label={`Delete board ${workSpace.title}`}
++                        className={`${rowAction} hover:text-red-400`}
++                      >
++                        <DeleteIcon sx={{ fontSize: 16 }} />
++                      </button>
++                    </li>
++                  );
++                })}
++              </ul>
++
++              {sorted.length === 0 && !isCreating && (
++                <p className="px-2 py-4 text-center text-sm text-zinc-500">
++                  You have no boards yet.
++                </p>
+               )}
+-              <button
+-                onClick={onCloseModal}
+-                className="text-center bg-black/50 rounded-full w-10 h-10 p-2 flex items-center justify-center active:bg-white my-5 mx-auto border-2 border-transparent hover:border-white transition-all duration-200"
+-              >
+-                <AddIcon />
+-              </button>
+-            </ul>
++
++              {isCreating ? (
++                <div className="mt-2 space-y-1 px-1">
++                  <InlineInput
++                    ariaLabel="New board name"
++                    placeholder="Board name"
++                    onCommit={(title) => {
++                      dispatch(addWorkSpace(title));
++                      setIsCreating(false);
++                    }}
++                    onCancel={() => setIsCreating(false)}
++                  />
++                  <p className="text-xs text-zinc-500">
++                    Enter to create, Escape to cancel.
++                  </p>
++                </div>
++              ) : (
++                <button
++                  type="button"
++                  onClick={() => setIsCreating(true)}
++                  className="mt-2 flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium text-zinc-300 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
++                >
++                  <AddIcon fontSize="small" />
++                  New board
++                </button>
++              )}
++            </nav>
+           </>
+         )}
+-      </motion.aside>
++      </aside>
++
++      <ConfirmDialog
++        open={pendingDelete !== null}
++        title={`Delete "${pendingDelete?.title ?? ""}"?`}
++        message="The board with all of its columns and tasks will be permanently removed."
++        confirmLabel="Delete board"
++        destructive
++        onCancel={() => setPendingDelete(null)}
++        onConfirm={() => {
++          if (pendingDelete) dispatch(deleteWorkSpace(pendingDelete.id));
++          setPendingDelete(null);
++        }}
++      />
+     </>
+   );
+ }
+diff --git a/src/sections/task.tsx b/src/sections/task.tsx
+index 8584f65..de62102 100644
+--- a/src/sections/task.tsx
++++ b/src/sections/task.tsx
+@@ -1,28 +1,20 @@
+ "use client";
+ 
+-import { useAppDispatch } from "@/redux/hooks";
+-import EditIcon from "@mui/icons-material/Edit";
+-import DeleteIcon from "@mui/icons-material/Delete";
+-import { deleteTask, editTask } from "@/redux/slices/userSlice";
+-import React, { useRef, useState } from "react";
+-import { motion } from "framer-motion";
++import { memo, useEffect, useRef, useState } from "react";
+ import { useSortable } from "@dnd-kit/sortable";
+ import { CSS } from "@dnd-kit/utilities";
+-import EidtTask from "./eidtTask";
+-
+-export default function Task({ task, workId }: any) {
+-  const [taskInfo, setTaskInfo] = useState({
+-    description: "",
+-    workSpaceId: "",
+-    columnId: "",
+-    assignment: "",
+-    id: "",
+-    status: "backLog",
+-  });
+-  const [iseditTask, setIsEditTask] = useState(false);
+-  const [openEditTask, setOpenEditTask] = useState(false);
++import { useAppDispatch } from "@/redux/hooks";
++import { deleteTask } from "@/redux/slices/userSlice";
++import ConfirmDialog from "@/components/ConfirmDialog";
++import EditTask from "./editTask";
++import TaskCard from "./taskCard";
++import type { Task as TaskType } from "@/types";
+ 
++function Task({ task }: { task: TaskType }) {
+   const dispatch = useAppDispatch();
++  const [isEditing, setIsEditing] = useState(false);
++  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
++
+   const {
+     setNodeRef,
+     attributes,
+@@ -30,103 +22,59 @@ export default function Task({ task, workId }: any) {
+     transform,
+     transition,
+     isDragging,
+-  } = useSortable({
+-    id: task.id,
+-    data: { type: "Task", task },
+-  });
+-
+-  const style = {
+-    transition,
+-    transform: CSS.Transform.toString(transform),
+-  };
+-
+-  function handlerOpenEditTaskModal() {
+-    setOpenEditTask(!openEditTask);
+-  }
++  } = useSortable({ id: task.id, data: { type: "Task" } });
+ 
+-  function handlerOpenEditTask(id?: string) {
+-    setTaskInfo((prev) => {
+-      return { ...prev, id: id ? id : "" };
+-    });
+-    setIsEditTask(!iseditTask);
+-  }
+-
+-  function handlerDeleteTask(id: string) {
+-    dispatch(deleteTask(id));
+-  }
+-
+-  if (isDragging)
+-    return (
+-      <div className="bg-white/10 opacity-40 max-w-[200px] grid gap-2  rounded-lg p-3 h-12 border-2 border-white.40" />
+-    );
++  // A drag that ends over the card can still emit a click; ignore that one.
++  const justDragged = useRef(false);
++  useEffect(() => {
++    if (isDragging) {
++      justDragged.current = true;
++      return;
++    }
++    const timer = setTimeout(() => {
++      justDragged.current = false;
++    }, 0);
++    return () => clearTimeout(timer);
++  }, [isDragging]);
+ 
+   return (
+     <>
+       <div
+         ref={setNodeRef}
+-        style={style}
++        style={{ transform: CSS.Transform.toString(transform), transition }}
+         {...attributes}
+         {...listeners}
+-        key={task.id}
+-        id={task.id}
+-        onClick={handlerOpenEditTaskModal}
+-        className="bg-zinc-700/50 hover:bg-zinc-700 max-w-[300px] w-[200px] grid gap-2 h-fit px-3 py-2 items-center rounded-lg transition-all duration-200"
++        aria-label={`Task: ${task.description}. Press space to pick up and move.`}
++        onClick={() => {
++          if (!justDragged.current) setIsEditing(true);
++        }}
++        className={`touch-manipulation rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 ${
++          isDragging ? "opacity-30" : ""
++        }`}
+       >
+-        <motion.div
+-          initial={{ y: -200, opacity: 0 }}
+-          animate={{ y: 0, opacity: 1 }}
+-          transition={{
+-            duration: 0.1,
+-            stiffness: 360,
+-            damping: 50,
+-          }}
+-        >
+-          <p className="flex gap-3 items-center justify-between break-words">
+-            <h2 className="flex-1">{task?.description}</h2>
+-            <div className="flex">
+-              <span
+-                onClick={() => handlerOpenEditTask(task.id)}
+-                className="cursor-pointer active:bg-white/30 rounded-full p-1 flex items-center"
+-              >
+-                <EditIcon fontSize="small" />
+-              </span>
+-              <span
+-                onClick={() => handlerDeleteTask(task.id)}
+-                className="cursor-pointer active:bg-white/30 rounded-full p-1 flex items-center"
+-              >
+-                <DeleteIcon fontSize="small" />
+-              </span>
+-            </div>
+-          </p>
+-          <div className="flex gap-1">
+-            {task?.assignment?.map(
+-              (i: string, index: number) =>
+-                index <= 3 && (
+-                  <>
+-                    <div key={i} className="relative">
+-                      <div className="rounded-full w-7 h-7 font-bold flex items-center justify-center text-sm text-white bg-zinc-600">
+-                        {i?.slice(0, 2)}
+-                      </div>
+-                    </div>
+-                    {index >= 3 && (
+-                      <div key={i} className="relative">
+-                        <div className="rounded-full w-7 h-7 font-bold flex items-center justify-center text-sm text-white bg-zinc-600">
+-                          {task.assignment.length - 4}+
+-                        </div>
+-                      </div>
+-                    )}
+-                  </>
+-                )
+-            )}
+-          </div>
+-        </motion.div>
+-      </div>
+-      {openEditTask && (
+-        <EidtTask
++        <TaskCard
+           task={task}
+-          handlerOpenEditTaskModal={handlerOpenEditTaskModal}
++          onEdit={() => setIsEditing(true)}
++          onDelete={() => setIsConfirmingDelete(true)}
+         />
+-      )}
++      </div>
++
++      {/* Rendered outside the draggable element so dialog events never reach dnd-kit. */}
++      {isEditing && <EditTask task={task} onClose={() => setIsEditing(false)} />}
++      <ConfirmDialog
++        open={isConfirmingDelete}
++        title="Delete task?"
++        message="This task will be permanently removed."
++        confirmLabel="Delete"
++        destructive
++        onCancel={() => setIsConfirmingDelete(false)}
++        onConfirm={() => {
++          setIsConfirmingDelete(false);
++          dispatch(deleteTask(task.id));
++        }}
++      />
+     </>
+   );
+ }
++
++export default memo(Task);
+diff --git a/src/sections/taskCard.tsx b/src/sections/taskCard.tsx
+new file mode 100644
+index 0000000..21d906a
+--- /dev/null
++++ b/src/sections/taskCard.tsx
+@@ -0,0 +1,89 @@
++import EditIcon from "@mui/icons-material/Edit";
++import DeleteIcon from "@mui/icons-material/Delete";
++import Avatar from "@/components/Avatar";
++import type { Task } from "@/types";
++
++const MAX_VISIBLE_ASSIGNEES = 3;
++
++interface TaskCardProps {
++  task: Task;
++  onEdit?: () => void;
++  onDelete?: () => void;
++  isOverlay?: boolean;
++}
++
++/** Purely presentational task card (also used for the drag overlay). */
++export default function TaskCard({
++  task,
++  onEdit,
++  onDelete,
++  isOverlay = false,
++}: TaskCardProps) {
++  const visible = task.assignees.slice(0, MAX_VISIBLE_ASSIGNEES);
++  const hidden = task.assignees.length - visible.length;
++
++  return (
++    <div
++      className={`group rounded-lg border bg-zinc-800 p-3 transition-colors ${
++        isOverlay
++          ? "rotate-2 cursor-grabbing border-purple-500 shadow-2xl shadow-purple-900/50"
++          : "cursor-grab border-zinc-700/60 shadow-sm hover:border-zinc-500"
++      }`}
++    >
++      <div className="flex items-start gap-2">
++        <p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-sm leading-snug text-zinc-100">
++          {task.description}
++        </p>
++        {!isOverlay && (
++          <div className="-mr-1 -mt-1 flex shrink-0 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
++            <button
++              type="button"
++              className="icon-btn h-7 w-7"
++              aria-label={`Edit task: ${task.description}`}
++              onPointerDown={(event) => event.stopPropagation()}
++              onClick={(event) => {
++                event.stopPropagation();
++                onEdit?.();
++              }}
++            >
++              <EditIcon sx={{ fontSize: 16 }} />
++            </button>
++            <button
++              type="button"
++              className="icon-btn h-7 w-7 hover:text-red-400"
++              aria-label={`Delete task: ${task.description}`}
++              onPointerDown={(event) => event.stopPropagation()}
++              onClick={(event) => {
++                event.stopPropagation();
++                onDelete?.();
++              }}
++            >
++              <DeleteIcon sx={{ fontSize: 16 }} />
++            </button>
++          </div>
++        )}
++      </div>
++
++      {task.assignees.length > 0 && (
++        <div className="mt-3 flex items-center -space-x-1.5">
++          {visible.map((name) => (
++            <Avatar
++              key={name}
++              name={name}
++              size="sm"
++              className="ring-2 ring-zinc-800"
++            />
++          ))}
++          {hidden > 0 && (
++            <span
++              title={task.assignees.slice(MAX_VISIBLE_ASSIGNEES).join(", ")}
++              className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-zinc-600 px-1 text-[10px] font-bold text-white ring-2 ring-zinc-800"
++            >
++              +{hidden}
++            </span>
++          )}
++        </div>
++      )}
++    </div>
++  );
++}
+diff --git a/src/sections/userMenu.tsx b/src/sections/userMenu.tsx
+deleted file mode 100644
+index 3c58ac5..0000000
+--- a/src/sections/userMenu.tsx
++++ /dev/null
+@@ -1,35 +0,0 @@
+-import React from "react";
+-import BarChartIcon from "@mui/icons-material/BarChart";
+-import FormatListBulletedIcon from "@mui/icons-material/FormatListBulleted";
+-import AlarmIcon from "@mui/icons-material/Alarm";
+-import DashboardIcon from "@mui/icons-material/Dashboard";
+-
+-export default function UserMenu({ workSpacesSelected }: any) {
+-  return (
+-    <nav>
+-      <ul className="bg-zinc-900 p-2 rounded-b-md flex gap-5 items-center px-4 mx-5 py-2">
+-        <li className="flex-1 flex items-center">
+-          <h2 className="text-lg font-medium uppercase w-fit rounded-md transition-all duration-200 p-1">
+-            {workSpacesSelected[0].title}
+-          </h2>
+-        </li>
+-        <li className="flex items-center border-b-2 border-transparent hover:border-purple-700 transition-all duration-200 p-1 gap-1">
+-          <h2 className="text-lg font-medium cursor-pointer">My Tasks</h2>
+-          <FormatListBulletedIcon fontSize="small" />
+-        </li>
+-        <li className="flex items-center border-b-2 border-transparent hover:border-purple-700 transition-all duration-200 p-1 gap-1">
+-          <h2 className="text-lg font-medium cursor-pointer ">analize</h2>
+-          <BarChartIcon fontSize="small" />
+-        </li>
+-        <li className="flex items-center border-b-2 border-transparent hover:border-purple-700 transition-all duration-200 p-1 gap-1">
+-          <h2 className="text-lg font-medium cursor-pointer ">Dengers</h2>
+-          <AlarmIcon fontSize="small" />
+-        </li>
+-        <li className="flex items-center border-b-2 border-transparent hover:border-purple-700 transition-all duration-200 p-1 gap-1">
+-          <h2 className="text-lg font-medium cursor-pointer ">My Boards</h2>
+-          <DashboardIcon fontSize="small" />
+-        </li>
+-      </ul>
+-    </nav>
+-  );
+-}
+diff --git a/src/sections/workSpace.tsx b/src/sections/workSpace.tsx
+index 30643fa..64799a6 100644
+--- a/src/sections/workSpace.tsx
++++ b/src/sections/workSpace.tsx
+@@ -1,197 +1,232 @@
+ "use client";
+ 
+-import Column from "@/sections/column";
+-import AddIcon from "@mui/icons-material/Add";
+-import { motion } from "framer-motion";
+-import { useAppDispatch, useAppSelector } from "@/redux/hooks";
+-import {
+-  addColumn,
+-  getColumns,
+-  getTasks,
+-  getWorkSpaceId,
+-  getWorkSpaces,
+-  selectWorkSpaces,
+-} from "@/redux/slices/userSlice";
++import { useCallback, useMemo, useRef, useState } from "react";
+ import {
++  closestCorners,
+   DndContext,
++  DragOverlay,
+   KeyboardSensor,
+   PointerSensor,
+   useSensor,
+   useSensors,
+-  DragStartEvent,
+-  DragOverlay,
+-  DragEndEvent,
+-  DragOverEvent,
++  type CollisionDetection,
++  type DragEndEvent,
++  type DragOverEvent,
++  type DragStartEvent,
+ } from "@dnd-kit/core";
+-import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+-import { useEffect, useState } from "react";
+-import { createPortal } from "react-dom";
+-import Task from "./task";
++import {
++  horizontalListSortingStrategy,
++  SortableContext,
++  sortableKeyboardCoordinates,
++} from "@dnd-kit/sortable";
++import { useAppDispatch, useAppSelector } from "@/redux/hooks";
++import {
++  moveTask,
++  reorderColumns,
++  selectActiveColumns,
++  selectActiveTasks,
++  selectActiveWorkSpace,
++  selectAllTasks,
++  selectSearchQuery,
++  setTasks,
++} from "@/redux/slices/userSlice";
++import AddColumn from "./addColumn";
++import Column from "./column";
++import TaskCard from "./taskCard";
++import type { Column as ColumnType, Task } from "@/types";
+ 
+-export default function WorkSpace() {
+-  const allColumns = useAppSelector(getColumns);
+-  const workspaceID = useAppSelector(getWorkSpaceId);
+-  const allTasks = useAppSelector(getTasks);
+-  const [tasks, setTasks] = useState<any>(allTasks || []);
+-  const workSpacesSelected = useAppSelector(getWorkSpaceId);
+-  const [activeColumn, setActiveColumn] = useState<any>(null);
+-  const [activeTask, setActiveTask] = useState<any>(null);
+-  const findColumns = allColumns.filter((i) => i.workSpaceId === workspaceID);
++const EMPTY_TASKS: Task[] = [];
+ 
+-  const [columns, setColumns] = useState<any>(findColumns || []);
++function matchesQuery(task: Task, query: string) {
++  return (
++    task.description.toLowerCase().includes(query) ||
++    task.assignees.some((name) => name.toLowerCase().includes(query))
++  );
++}
+ 
++export default function WorkSpace() {
+   const dispatch = useAppDispatch();
++  const workSpace = useAppSelector(selectActiveWorkSpace);
++  const columns = useAppSelector(selectActiveColumns);
++  const tasks = useAppSelector(selectActiveTasks);
++  const allTasks = useAppSelector(selectAllTasks);
++  const searchQuery = useAppSelector(selectSearchQuery);
++
++  const [activeColumn, setActiveColumn] = useState<ColumnType | null>(null);
++  const [activeTask, setActiveTask] = useState<Task | null>(null);
++  // Snapshot taken when a drag starts, so Escape can put everything back.
++  const snapshot = useRef<Task[] | null>(null);
++
++  const query = searchQuery.trim().toLowerCase();
++  const isFiltering = query.length > 0;
++
++  const { visibleByColumn, totalByColumn } = useMemo(() => {
++    const visible: Record<string, Task[]> = {};
++    const totals: Record<string, number> = {};
++    for (const task of tasks) {
++      totals[task.columnId] = (totals[task.columnId] ?? 0) + 1;
++      if (isFiltering && !matchesQuery(task, query)) continue;
++      (visible[task.columnId] ??= []).push(task);
++    }
++    return { visibleByColumn: visible, totalByColumn: totals };
++  }, [tasks, query, isFiltering]);
+ 
+-  useEffect(() => {
+-    setColumns(allColumns);
+-    setTasks(allTasks);
+-  }, [allColumns, allTasks]);
+-
+-  function handlerAddColumn() {
+-    dispatch(
+-      addColumn({ title: "new column", workSpaceId: workSpacesSelected })
+-    );
+-  }
++  const columnIds = useMemo(() => columns.map((c) => c.id), [columns]);
+ 
+   const sensors = useSensors(
+-    useSensor(PointerSensor, {
+-      activationConstraint: { distance: 10 },
+-    }),
+-    useSensor(KeyboardSensor, {
+-      coordinateGetter: sortableKeyboardCoordinates,
+-    })
++    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
++    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+   );
+ 
+-  function handleDragEnd(event: DragEndEvent) {
+-    setActiveColumn(null);
+-    setActiveTask(null);
+-    const { active, over } = event;
+-
+-    if (!over) return;
+-
+-    const activeColumnId = active.id;
+-    const overColumnId = over.id;
+-
+-    if (activeColumnId === overColumnId) return;
++  // While dragging a column only other columns are valid drop targets.
++  const collisionDetection = useCallback<CollisionDetection>((args) => {
++    if (args.active.data.current?.type === "Column") {
++      return closestCorners({
++        ...args,
++        droppableContainers: args.droppableContainers.filter(
++          (container) => container.data.current?.type === "Column"
++        ),
++      });
++    }
++    return closestCorners(args);
++  }, []);
++
++  function handleDragStart({ active }: DragStartEvent) {
++    snapshot.current = allTasks;
++    const type = active.data.current?.type;
++    if (type === "Column") {
++      setActiveColumn(columns.find((c) => c.id === active.id) ?? null);
++    } else if (type === "Task") {
++      setActiveTask(tasks.find((t) => t.id === active.id) ?? null);
++    }
++  }
+ 
+-    setColumns((col: any) => {
+-      const activeColumnIdIndex = columns.findIndex(
+-        (col: any) => col.id === activeColumnId
++  // Move tasks between columns live, so the target column makes room.
++  function handleDragOver({ active, over }: DragOverEvent) {
++    if (!over || active.id === over.id) return;
++    if (active.data.current?.type !== "Task") return;
++
++    const overType = over.data.current?.type;
++    if (overType === "Task") {
++      const activeTaskNow = allTasks.find((t) => t.id === active.id);
++      const overTask = allTasks.find((t) => t.id === over.id);
++      if (!activeTaskNow || !overTask) return;
++      if (activeTaskNow.columnId === overTask.columnId) return; // handled on drop
++      dispatch(
++        moveTask({
++          activeId: String(active.id),
++          overId: String(over.id),
++          overType: "Task",
++        })
+       );
+-      const overColumnIdIndex = columns.findIndex(
+-        (col: any) => col.id === overColumnId
++    } else if (overType === "Column") {
++      dispatch(
++        moveTask({
++          activeId: String(active.id),
++          overId: String(over.id),
++          overType: "Column",
++        })
+       );
+-
+-      return arrayMove(columns, activeColumnIdIndex, overColumnIdIndex);
+-    });
+-  }
+-
+-  function onDragStart(event: DragStartEvent) {
+-    if (event.active.data.current?.type === "Column") {
+-      setActiveColumn(event.active.data.current.column);
+     }
++  }
+ 
+-    if (event.active.data.current?.type === "Task") {
+-      setActiveTask(event.active.data.current.task);
++  function handleDragEnd({ active, over }: DragEndEvent) {
++    const type = active.data.current?.type;
++    setActiveColumn(null);
++    setActiveTask(null);
++    snapshot.current = null;
++    if (!over || active.id === over.id) return;
++
++    if (type === "Column") {
++      // Dropping on a task inside a column still means "that column".
++      const overColumnId =
++        over.data.current?.type === "Task"
++          ? allTasks.find((t) => t.id === over.id)?.columnId
++          : String(over.id);
++      if (overColumnId) {
++        dispatch(
++          reorderColumns({
++            activeId: String(active.id),
++            overId: overColumnId,
++          })
++        );
++      }
++    } else if (type === "Task" && over.data.current?.type === "Task") {
++      dispatch(
++        moveTask({
++          activeId: String(active.id),
++          overId: String(over.id),
++          overType: "Task",
++        })
++      );
+     }
+   }
+ 
+-  function onDragOver(event: DragOverEvent) {
+-    const { active, over } = event;
+-
+-    if (!over) return;
+-
+-    const activeId = active.id;
+-    const overId = over.id;
+-
+-    if (activeId === overId) return;
+-
+-    const isActiveATask = active.data.current?.type === "Task";
+-    const isOverATask = over.data.current?.type === "Task";
+-    const isOverAColumn = over.data.current?.type === "Column";
+-
+-    if (isActiveATask && isOverATask) {
+-      setTasks((tasks: any) => {
+-        const updateTasks = [...tasks];
+-        const activeIndex = tasks.findIndex((i: any) => i.id === activeId);
+-        const overIndex = tasks.findIndex((i: any) => i.id === overId);
+-
+-        if (tasks[activeIndex].columnId !== tasks[overIndex].columnId) {
+-          updateTasks[activeIndex] = {
+-            ...updateTasks[activeIndex],
+-            columnId: tasks[overIndex].columnId,
+-          };
+-        }
+-
+-        return arrayMove(updateTasks, activeIndex, overIndex);
+-      });
+-    }
++  function handleDragCancel() {
++    if (snapshot.current) dispatch(setTasks(snapshot.current));
++    snapshot.current = null;
++    setActiveColumn(null);
++    setActiveTask(null);
++  }
+ 
+-    if (isActiveATask && isOverAColumn) {
+-      setTasks((tasks: any) => {
+-        const updateTasks = [...tasks];
+-        const activeIndex = tasks.findIndex((i: any) => i.id === activeId);
+-        if (tasks[activeIndex].columnId !== overId) {
+-          updateTasks[activeIndex] = {
+-            ...updateTasks[activeIndex],
+-            columnId: overId,
+-          };
+-        }
+-        return arrayMove(updateTasks, activeIndex, 0);
+-      });
+-    }
++  if (!workSpace) {
++    return (
++      <div className="flex flex-1 items-center justify-center p-8 text-center">
++        <div className="max-w-sm space-y-2">
++          <h2 className="text-xl font-semibold text-white">No board selected</h2>
++          <p className="text-sm text-zinc-400">
++            Create a board from the sidebar to start organising your issues.
++          </p>
++        </div>
++      </div>
++    );
+   }
+ 
+   return (
+-    <section id="section" className="p-5">
+-      <div className="w-fit flex gap-10 relative">
+-        <DndContext
+-          sensors={sensors}
+-          onDragEnd={handleDragEnd}
+-          onDragStart={onDragStart}
+-          onDragOver={onDragOver}
+-        >
+-          {columns?.length > 0 &&
+-            columns?.map(
+-              (i: any) =>
+-                i.workSpaceId === workspaceID && (
+-                  <Column column={i} key={i.id} tasks={tasks} />
+-                )
+-            )}
+-          {createPortal(
+-            <DragOverlay>
+-              {activeColumn && (
+-                <Column column={activeColumn} key={activeColumn?.id} />
+-              )}
+-              {activeTask && <Task task={activeTask} />}
+-            </DragOverlay>,
+-            document.body
++    <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden p-4">
++      <DndContext
++        id="board-dnd"
++        sensors={sensors}
++        collisionDetection={collisionDetection}
++        onDragStart={handleDragStart}
++        onDragOver={handleDragOver}
++        onDragEnd={handleDragEnd}
++        onDragCancel={handleDragCancel}
++      >
++        <div className="flex h-full w-max items-start gap-4 pr-4">
++          <SortableContext
++            items={columnIds}
++            strategy={horizontalListSortingStrategy}
++          >
++            {columns.map((column) => (
++              <Column
++                key={column.id}
++                column={column}
++                tasks={visibleByColumn[column.id] ?? EMPTY_TASKS}
++                totalCount={totalByColumn[column.id] ?? 0}
++                isFiltering={isFiltering}
++              />
++            ))}
++          </SortableContext>
++          <AddColumn workSpaceId={workSpace.id} />
++        </div>
++
++        <DragOverlay dropAnimation={{ duration: 180 }}>
++          {activeTask && (
++            <div className="w-64">
++              <TaskCard task={activeTask} isOverlay />
++            </div>
+           )}
+-        </DndContext>
+-        <motion.button
+-          initial={{
+-            y: -300,
+-          }}
+-          animate={{ y: 0 }}
+-          transition={{
+-            duration: 0.3,
+-            stiffness: 280,
+-            damping: 80,
+-          }}
+-          onClick={handlerAddColumn}
+-          className="text-center bg-zinc-800 hover:bg-white/30 rounded-lg w-fit h-10 py-2 px-5 flex font-semibold items-center justify-center text-black active:bg-white mx-auto gap-2 active:bg-white/50 border-2 border-purple-600 transition-all duration-200 min-w-[200px]"
+-        >
+-          <span className="flex items-center justify-center rounded-full">
+-            <AddIcon
+-              fontSize="small"
+-              style={{
+-                color: "white",
+-              }}
+-            />
+-          </span>
+-          <h2 className="text-white">Add Column</h2>
+-        </motion.button>
+-      </div>
+-    </section>
++          {activeColumn && (
++            <div className="w-72 rounded-xl border border-purple-500 bg-zinc-900 p-3 shadow-2xl shadow-purple-900/50">
++              <p className="font-semibold text-white">{activeColumn.title}</p>
++              <p className="text-xs text-zinc-400">
++                {totalByColumn[activeColumn.id] ?? 0} tasks
++              </p>
++            </div>
++          )}
++        </DragOverlay>
++      </DndContext>
++    </div>
+   );
+ }
+diff --git a/src/types/index.ts b/src/types/index.ts
+new file mode 100644
+index 0000000..61454e6
+--- /dev/null
++++ b/src/types/index.ts
+@@ -0,0 +1,24 @@
++export interface Workspace {
++  id: string;
++  title: string;
++  isFavorite: boolean;
++}
++
++export interface Column {
++  id: string;
++  workSpaceId: string;
++  title: string;
++}
++
++export interface Task {
++  id: string;
++  workSpaceId: string;
++  columnId: string;
++  description: string;
++  assignees: string[];
++}
++
++export interface UserProfile {
++  name: string;
++  lastName: string;
++}
+diff --git a/src/utils/avatar.ts b/src/utils/avatar.ts
+new file mode 100644
+index 0000000..60dbfa2
+--- /dev/null
++++ b/src/utils/avatar.ts
+@@ -0,0 +1,27 @@
++// Tailwind scans this file, so the class names must stay as complete literals.
++const AVATAR_COLORS = [
++  "bg-purple-600",
++  "bg-sky-600",
++  "bg-emerald-600",
++  "bg-amber-600",
++  "bg-rose-600",
++  "bg-indigo-600",
++  "bg-teal-600",
++  "bg-fuchsia-600",
++] as const;
++
++/** Deterministic colour so the same person always gets the same avatar. */
++export function getAvatarColor(name: string): string {
++  let hash = 0;
++  for (let i = 0; i < name.length; i++) {
++    hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
++  }
++  return AVATAR_COLORS[hash % AVATAR_COLORS.length];
++}
++
++export function getInitials(name: string): string {
++  const parts = name.trim().split(/\s+/).filter(Boolean);
++  if (parts.length === 0) return "?";
++  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
++  return (parts[0][0] + parts[1][0]).toUpperCase();
++}
+diff --git a/src/utils/generateRandomBg.tsx b/src/utils/generateRandomBg.tsx
+deleted file mode 100644
+index 401b8ed..0000000
+--- a/src/utils/generateRandomBg.tsx
++++ /dev/null
+@@ -1,11 +0,0 @@
+-export function GenerateRandomBg() {
+-  // Generate random RGB values within a range that ensures light colors (close to white)
+-  const r = Math.floor(Math.random() * 150) + 100; // R component (100-255)
+-  const g = Math.floor(Math.random() * 150) + 100; // G component (100-255)
+-  const b = Math.floor(Math.random() * 150) + 100; // B component (100-255)
+-
+-  // Convert RGB values to hexadecimal format
+-  const colorCode = `#${r.toString(16)}${g.toString(16)}${b.toString(16)}`;
+-
+-  return colorCode;
+-}
+diff --git a/tailwind.config.ts b/tailwind.config.ts
+index f93b20e..64bc31c 100644
+--- a/tailwind.config.ts
++++ b/tailwind.config.ts
+@@ -1,20 +1,9 @@
+ import type { Config } from "tailwindcss";
+ 
+ const config: Config = {
+-  content: [
+-    "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
+-    "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
+-    "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
+-    "./src/sections/**/*.{js,ts,jsx,tsx,mdx}",
+-  ],
++  content: ["./src/**/*.{js,ts,jsx,tsx,mdx}"],
+   theme: {
+-    extend: {
+-      backgroundImage: {
+-        "gradient-radial": "radial-gradient(var(--tw-gradient-stops))",
+-        "gradient-conic":
+-          "conic-gradient(from 180deg at 50% 50%, var(--tw-gradient-stops))",
+-      },
+-    },
++    extend: {},
+   },
+   plugins: [],
+ };

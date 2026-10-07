@@ -1,47 +1,37 @@
 "use client";
 
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import Loading from "@/components/loading";
 import { useAppSelector } from "@/redux/hooks";
-import { getAuth, selectWorkSpaces } from "@/redux/slices/userSlice";
+import { selectAuth, selectHydrated } from "@/redux/slices/userSlice";
+import BoardToolbar from "@/sections/boardToolbar";
+import Header from "@/sections/header";
 import SideBar from "@/sections/sideBar";
 import WorkSpace from "@/sections/workSpace";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import Loading from "@/components/loading";
-import Header from "@/sections/header";
-import UserMenu from "@/sections/userMenu";
 
 export default function Home() {
-  const [loading, setLoading] = useState(true);
-  const auth = useAppSelector(getAuth);
-  const workSpacesSelected = useAppSelector(selectWorkSpaces);
-
   const router = useRouter();
+  const hydrated = useAppSelector(selectHydrated);
+  const auth = useAppSelector(selectAuth);
 
+  // Wait for saved data to load before deciding whether the user is signed in.
   useEffect(() => {
-    if (!auth) {
-      router.push("/login");
-    }
-    setTimeout(() => {
-      setLoading(false);
-    }, 3000);
-  }, [auth]);
+    if (hydrated && !auth) router.replace("/login");
+  }, [hydrated, auth, router]);
 
-  let content = auth ? (
-    loading ? (
-      <Loading />
-    ) : (
-      <>
-        <Header />
-        <UserMenu workSpacesSelected={workSpacesSelected} />
-        <div
-          style={{ height: "calc(100vh - 120px)" }}
-          className="flex overflow-x-auto transition-all duration-200 overflow-y-hidden"
-        >
-          <SideBar />
+  if (!hydrated || !auth) return <Loading />;
+
+  return (
+    <div className="flex h-dvh flex-col">
+      <Header />
+      <div className="flex min-h-0 flex-1">
+        <SideBar />
+        <main className="flex min-w-0 flex-1 flex-col">
+          <BoardToolbar />
           <WorkSpace />
-        </div>
-      </>
-    )
-  ) : null;
-  return <main>{content}</main>;
+        </main>
+      </div>
+    </div>
+  );
 }

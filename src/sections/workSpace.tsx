@@ -1,197 +1,232 @@
 "use client";
 
-import Column from "@/sections/column";
-import AddIcon from "@mui/icons-material/Add";
-import { motion } from "framer-motion";
-import { useAppDispatch, useAppSelector } from "@/redux/hooks";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
-  addColumn,
-  getColumns,
-  getTasks,
-  getWorkSpaceId,
-  getWorkSpaces,
-  selectWorkSpaces,
-} from "@/redux/slices/userSlice";
-import {
+  closestCorners,
   DndContext,
+  DragOverlay,
   KeyboardSensor,
   PointerSensor,
   useSensor,
   useSensors,
-  DragStartEvent,
-  DragOverlay,
-  DragEndEvent,
-  DragOverEvent,
+  type CollisionDetection,
+  type DragEndEvent,
+  type DragOverEvent,
+  type DragStartEvent,
 } from "@dnd-kit/core";
-import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
-import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
-import Task from "./task";
+import {
+  horizontalListSortingStrategy,
+  SortableContext,
+  sortableKeyboardCoordinates,
+} from "@dnd-kit/sortable";
+import { useAppDispatch, useAppSelector } from "@/redux/hooks";
+import {
+  moveTask,
+  reorderColumns,
+  selectActiveColumns,
+  selectActiveTasks,
+  selectActiveWorkSpace,
+  selectAllTasks,
+  selectSearchQuery,
+  setTasks,
+} from "@/redux/slices/userSlice";
+import AddColumn from "./addColumn";
+import Column from "./column";
+import TaskCard from "./taskCard";
+import type { Column as ColumnType, Task } from "@/types";
+
+const EMPTY_TASKS: Task[] = [];
+
+function matchesQuery(task: Task, query: string) {
+  return (
+    task.description.toLowerCase().includes(query) ||
+    task.assignees.some((name) => name.toLowerCase().includes(query))
+  );
+}
 
 export default function WorkSpace() {
-  const allColumns = useAppSelector(getColumns);
-  const workspaceID = useAppSelector(getWorkSpaceId);
-  const allTasks = useAppSelector(getTasks);
-  const [tasks, setTasks] = useState<any>(allTasks || []);
-  const workSpacesSelected = useAppSelector(getWorkSpaceId);
-  const [activeColumn, setActiveColumn] = useState<any>(null);
-  const [activeTask, setActiveTask] = useState<any>(null);
-  const findColumns = allColumns.filter((i) => i.workSpaceId === workspaceID);
-
-  const [columns, setColumns] = useState<any>(findColumns || []);
-
   const dispatch = useAppDispatch();
+  const workSpace = useAppSelector(selectActiveWorkSpace);
+  const columns = useAppSelector(selectActiveColumns);
+  const tasks = useAppSelector(selectActiveTasks);
+  const allTasks = useAppSelector(selectAllTasks);
+  const searchQuery = useAppSelector(selectSearchQuery);
 
-  useEffect(() => {
-    setColumns(allColumns);
-    setTasks(allTasks);
-  }, [allColumns, allTasks]);
+  const [activeColumn, setActiveColumn] = useState<ColumnType | null>(null);
+  const [activeTask, setActiveTask] = useState<Task | null>(null);
+  // Snapshot taken when a drag starts, so Escape can put everything back.
+  const snapshot = useRef<Task[] | null>(null);
 
-  function handlerAddColumn() {
-    dispatch(
-      addColumn({ title: "new column", workSpaceId: workSpacesSelected })
+  const query = searchQuery.trim().toLowerCase();
+  const isFiltering = query.length > 0;
+
+  const { visibleByColumn, totalByColumn } = useMemo(() => {
+    const visible: Record<string, Task[]> = {};
+    const totals: Record<string, number> = {};
+    for (const task of tasks) {
+      totals[task.columnId] = (totals[task.columnId] ?? 0) + 1;
+      if (isFiltering && !matchesQuery(task, query)) continue;
+      (visible[task.columnId] ??= []).push(task);
+    }
+    return { visibleByColumn: visible, totalByColumn: totals };
+  }, [tasks, query, isFiltering]);
+
+  const columnIds = useMemo(() => columns.map((c) => c.id), [columns]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  // While dragging a column only other columns are valid drop targets.
+  const collisionDetection = useCallback<CollisionDetection>((args) => {
+    if (args.active.data.current?.type === "Column") {
+      return closestCorners({
+        ...args,
+        droppableContainers: args.droppableContainers.filter(
+          (container) => container.data.current?.type === "Column"
+        ),
+      });
+    }
+    return closestCorners(args);
+  }, []);
+
+  function handleDragStart({ active }: DragStartEvent) {
+    snapshot.current = allTasks;
+    const type = active.data.current?.type;
+    if (type === "Column") {
+      setActiveColumn(columns.find((c) => c.id === active.id) ?? null);
+    } else if (type === "Task") {
+      setActiveTask(tasks.find((t) => t.id === active.id) ?? null);
+    }
+  }
+
+  // Move tasks between columns live, so the target column makes room.
+  function handleDragOver({ active, over }: DragOverEvent) {
+    if (!over || active.id === over.id) return;
+    if (active.data.current?.type !== "Task") return;
+
+    const overType = over.data.current?.type;
+    if (overType === "Task") {
+      const activeTaskNow = allTasks.find((t) => t.id === active.id);
+      const overTask = allTasks.find((t) => t.id === over.id);
+      if (!activeTaskNow || !overTask) return;
+      if (activeTaskNow.columnId === overTask.columnId) return; // handled on drop
+      dispatch(
+        moveTask({
+          activeId: String(active.id),
+          overId: String(over.id),
+          overType: "Task",
+        })
+      );
+    } else if (overType === "Column") {
+      dispatch(
+        moveTask({
+          activeId: String(active.id),
+          overId: String(over.id),
+          overType: "Column",
+        })
+      );
+    }
+  }
+
+  function handleDragEnd({ active, over }: DragEndEvent) {
+    const type = active.data.current?.type;
+    setActiveColumn(null);
+    setActiveTask(null);
+    snapshot.current = null;
+    if (!over || active.id === over.id) return;
+
+    if (type === "Column") {
+      // Dropping on a task inside a column still means "that column".
+      const overColumnId =
+        over.data.current?.type === "Task"
+          ? allTasks.find((t) => t.id === over.id)?.columnId
+          : String(over.id);
+      if (overColumnId) {
+        dispatch(
+          reorderColumns({
+            activeId: String(active.id),
+            overId: overColumnId,
+          })
+        );
+      }
+    } else if (type === "Task" && over.data.current?.type === "Task") {
+      dispatch(
+        moveTask({
+          activeId: String(active.id),
+          overId: String(over.id),
+          overType: "Task",
+        })
+      );
+    }
+  }
+
+  function handleDragCancel() {
+    if (snapshot.current) dispatch(setTasks(snapshot.current));
+    snapshot.current = null;
+    setActiveColumn(null);
+    setActiveTask(null);
+  }
+
+  if (!workSpace) {
+    return (
+      <div className="flex flex-1 items-center justify-center p-8 text-center">
+        <div className="max-w-sm space-y-2">
+          <h2 className="text-xl font-semibold text-white">No board selected</h2>
+          <p className="text-sm text-zinc-400">
+            Create a board from the sidebar to start organising your issues.
+          </p>
+        </div>
+      </div>
     );
   }
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 10 },
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
-  );
-
-  function handleDragEnd(event: DragEndEvent) {
-    setActiveColumn(null);
-    setActiveTask(null);
-    const { active, over } = event;
-
-    if (!over) return;
-
-    const activeColumnId = active.id;
-    const overColumnId = over.id;
-
-    if (activeColumnId === overColumnId) return;
-
-    setColumns((col: any) => {
-      const activeColumnIdIndex = columns.findIndex(
-        (col: any) => col.id === activeColumnId
-      );
-      const overColumnIdIndex = columns.findIndex(
-        (col: any) => col.id === overColumnId
-      );
-
-      return arrayMove(columns, activeColumnIdIndex, overColumnIdIndex);
-    });
-  }
-
-  function onDragStart(event: DragStartEvent) {
-    if (event.active.data.current?.type === "Column") {
-      setActiveColumn(event.active.data.current.column);
-    }
-
-    if (event.active.data.current?.type === "Task") {
-      setActiveTask(event.active.data.current.task);
-    }
-  }
-
-  function onDragOver(event: DragOverEvent) {
-    const { active, over } = event;
-
-    if (!over) return;
-
-    const activeId = active.id;
-    const overId = over.id;
-
-    if (activeId === overId) return;
-
-    const isActiveATask = active.data.current?.type === "Task";
-    const isOverATask = over.data.current?.type === "Task";
-    const isOverAColumn = over.data.current?.type === "Column";
-
-    if (isActiveATask && isOverATask) {
-      setTasks((tasks: any) => {
-        const updateTasks = [...tasks];
-        const activeIndex = tasks.findIndex((i: any) => i.id === activeId);
-        const overIndex = tasks.findIndex((i: any) => i.id === overId);
-
-        if (tasks[activeIndex].columnId !== tasks[overIndex].columnId) {
-          updateTasks[activeIndex] = {
-            ...updateTasks[activeIndex],
-            columnId: tasks[overIndex].columnId,
-          };
-        }
-
-        return arrayMove(updateTasks, activeIndex, overIndex);
-      });
-    }
-
-    if (isActiveATask && isOverAColumn) {
-      setTasks((tasks: any) => {
-        const updateTasks = [...tasks];
-        const activeIndex = tasks.findIndex((i: any) => i.id === activeId);
-        if (tasks[activeIndex].columnId !== overId) {
-          updateTasks[activeIndex] = {
-            ...updateTasks[activeIndex],
-            columnId: overId,
-          };
-        }
-        return arrayMove(updateTasks, activeIndex, 0);
-      });
-    }
-  }
-
   return (
-    <section id="section" className="p-5">
-      <div className="w-fit flex gap-10 relative">
-        <DndContext
-          sensors={sensors}
-          onDragEnd={handleDragEnd}
-          onDragStart={onDragStart}
-          onDragOver={onDragOver}
-        >
-          {columns?.length > 0 &&
-            columns?.map(
-              (i: any) =>
-                i.workSpaceId === workspaceID && (
-                  <Column column={i} key={i.id} tasks={tasks} />
-                )
-            )}
-          {createPortal(
-            <DragOverlay>
-              {activeColumn && (
-                <Column column={activeColumn} key={activeColumn?.id} />
-              )}
-              {activeTask && <Task task={activeTask} />}
-            </DragOverlay>,
-            document.body
+    <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden p-4">
+      <DndContext
+        id="board-dnd"
+        sensors={sensors}
+        collisionDetection={collisionDetection}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
+      >
+        <div className="flex h-full w-max items-start gap-4 pr-4">
+          <SortableContext
+            items={columnIds}
+            strategy={horizontalListSortingStrategy}
+          >
+            {columns.map((column) => (
+              <Column
+                key={column.id}
+                column={column}
+                tasks={visibleByColumn[column.id] ?? EMPTY_TASKS}
+                totalCount={totalByColumn[column.id] ?? 0}
+                isFiltering={isFiltering}
+              />
+            ))}
+          </SortableContext>
+          <AddColumn workSpaceId={workSpace.id} />
+        </div>
+
+        <DragOverlay dropAnimation={{ duration: 180 }}>
+          {activeTask && (
+            <div className="w-64">
+              <TaskCard task={activeTask} isOverlay />
+            </div>
           )}
-        </DndContext>
-        <motion.button
-          initial={{
-            y: -300,
-          }}
-          animate={{ y: 0 }}
-          transition={{
-            duration: 0.3,
-            stiffness: 280,
-            damping: 80,
-          }}
-          onClick={handlerAddColumn}
-          className="text-center bg-zinc-800 hover:bg-white/30 rounded-lg w-fit h-10 py-2 px-5 flex font-semibold items-center justify-center text-black active:bg-white mx-auto gap-2 active:bg-white/50 border-2 border-purple-600 transition-all duration-200 min-w-[200px]"
-        >
-          <span className="flex items-center justify-center rounded-full">
-            <AddIcon
-              fontSize="small"
-              style={{
-                color: "white",
-              }}
-            />
-          </span>
-          <h2 className="text-white">Add Column</h2>
-        </motion.button>
-      </div>
-    </section>
+          {activeColumn && (
+            <div className="w-72 rounded-xl border border-purple-500 bg-zinc-900 p-3 shadow-2xl shadow-purple-900/50">
+              <p className="font-semibold text-white">{activeColumn.title}</p>
+              <p className="text-xs text-zinc-400">
+                {totalByColumn[activeColumn.id] ?? 0} tasks
+              </p>
+            </div>
+          )}
+        </DragOverlay>
+      </DndContext>
+    </div>
   );
 }

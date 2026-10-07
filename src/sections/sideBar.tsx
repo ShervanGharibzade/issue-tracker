@@ -1,228 +1,241 @@
 "use client";
 
-import EditIcon from "@mui/icons-material/Edit";
-import DeleteIcon from "@mui/icons-material/Delete";
-import { motion } from "framer-motion";
+import { useEffect, useMemo, useState } from "react";
 import AddIcon from "@mui/icons-material/Add";
-import CheckCircleIcon from "@mui/icons-material/CheckCircle";
-import CancelIcon from "@mui/icons-material/Cancel";
-import FormatListBulletedIcon from "@mui/icons-material/FormatListBulleted";
-import { ArrowRight } from "@mui/icons-material";
-import StarOutlineIcon from "@mui/icons-material/StarOutline";
+import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
+import ChevronRightIcon from "@mui/icons-material/ChevronRight";
+import DeleteIcon from "@mui/icons-material/Delete";
+import EditIcon from "@mui/icons-material/Edit";
 import StarIcon from "@mui/icons-material/Star";
+import StarOutlineIcon from "@mui/icons-material/StarOutline";
+import ConfirmDialog from "@/components/ConfirmDialog";
+import InlineInput from "@/components/InlineInput";
 import { useAppDispatch, useAppSelector } from "@/redux/hooks";
-import { useEffect, useRef, useState } from "react";
 import {
-  addNewWorkSpace,
-  changeWorkSpaceName,
+  addWorkSpace,
   deleteWorkSpace,
-  getWorkSpaceId,
+  renameWorkSpace,
+  selectActiveWorkSpaceId,
   selectWorkSpace,
   selectWorkSpaces,
   toggleFavorite,
 } from "@/redux/slices/userSlice";
+import type { Workspace } from "@/types";
+
+const rowAction =
+  "icon-btn h-7 w-7 opacity-0 focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100";
 
 export default function SideBar() {
-  const [nameWorkSpace, setNameWorkSpace] = useState({ title: "", id: "" });
-  const [openSideBar, setOpentSideBar] = useState(false);
-  const [show, setShow] = useState(false);
-  const [edit, setEdit] = useState(false);
-  const inputBoard = useRef<any>(null);
-
+  const dispatch = useAppDispatch();
   const workSpaces = useAppSelector(selectWorkSpaces);
-  const workSpaceId = useAppSelector(getWorkSpaceId);
-  const workSpacesSorted = [...workSpaces].sort((a, b) =>
-    a.isFovrite === b.isFovrite ? 0 : a.isFovrite ? -1 : 1
+  const activeId = useAppSelector(selectActiveWorkSpaceId);
+
+  const [collapsed, setCollapsed] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<Workspace | null>(null);
+
+  // Start collapsed on small screens so the board gets the space.
+  useEffect(() => {
+    if (window.matchMedia("(max-width: 767px)").matches) setCollapsed(true);
+  }, []);
+
+  // Favourites first; Array.sort is stable so the rest keep their order.
+  const sorted = useMemo(
+    () =>
+      [...workSpaces].sort(
+        (a, b) => Number(b.isFavorite) - Number(a.isFavorite)
+      ),
+    [workSpaces]
   );
 
-  useEffect(() => {
-    if (inputBoard.current) {
-      inputBoard.current?.focus();
-    }
-  }, [show, edit]);
-
-  const dispatch = useAppDispatch();
-
-  function handlerCreateWorkSpace() {
-    dispatch(addNewWorkSpace(nameWorkSpace.title));
-    setNameWorkSpace({ title: "", id: "" });
-    setShow(!show);
-  }
-
-  function handlerOpenSideBar() {
-    setOpentSideBar(!openSideBar);
-  }
-
-  function handleToggleFovrite(id: string) {
-    dispatch(toggleFavorite(id));
-  }
-
-  function handleDelete(id: string) {
-    dispatch(deleteWorkSpace(id));
-  }
-
-  function handleChnageWorkSpaceTitle(e: any, id: string) {
-    const { value } = e.target;
-    setNameWorkSpace((prev) => {
-      return { ...prev, id: id, title: value };
-    });
-  }
-
-  function handleEditWorkSpace(idWorkSpace: string) {
-    setEdit(!edit);
-    setNameWorkSpace((prevState) => ({
-      ...prevState,
-      id: prevState.id === idWorkSpace ? "" : idWorkSpace,
-    }));
-  }
-
-  function updateWorkSpace(e: any) {
-    if (e.key === "Enter") {
-      dispatch(changeWorkSpaceName(nameWorkSpace));
-      setNameWorkSpace({ title: "", id: "" });
-    }
-  }
-
-  function onCloseModal() {
-    setShow(!show);
-    inputBoard.current?.focus();
-  }
-
-  function handlerChange(e: any) {
-    const { value } = e.target;
-    setNameWorkSpace({ title: value, id: "" });
-  }
-
-  function handleSelectWorkSpace(id: string) {
-    dispatch(selectWorkSpace(id));
-  }
+  const toggle = (
+    <button
+      type="button"
+      onClick={() => setCollapsed((value) => !value)}
+      className="icon-btn"
+      aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+      aria-expanded={!collapsed}
+    >
+      {collapsed ? <ChevronRightIcon /> : <ChevronLeftIcon />}
+    </button>
+  );
 
   return (
     <>
-      <motion.aside
-        initial={{ x: -200 }}
-        animate={{ x: 0 }}
-        transition={{
-          duration: 0.3,
-          stiffness: 360,
-          damping: 50,
-        }}
-        style={{ height: "calc(100vh - 150px)" }}
-        className={`p-5 m-3 bg-zinc-900 rounded-md h-full shadow-xl shadow-purple-600/20 ${
-          openSideBar ? "w-[20px]" : "w-[300px]"
-        } transition-all duration-200 relative`}
+      <aside
+        aria-label="Boards"
+        className={`flex shrink-0 flex-col border-r border-zinc-800 bg-zinc-900/60 transition-[width] duration-200 ${
+          collapsed ? "w-14" : "w-64"
+        }`}
       >
-        <div
-          onClick={handlerOpenSideBar}
-          className="bg-black w-fit absolute top-1/2 -translate-y-1/2 -right-3"
-        >
-          <span
-            style={{
-              transform: `rotate(${openSideBar ? "0" : "-180deg"})`,
-              transition: "transform ease-in-out .5s",
-            }}
-            className="flex items-center justify-center border-2 border-white w-fit rounded-full opacity-65 hover:opacity-100 cursor-pointer"
-          >
-            <ArrowRight />
-          </span>
-        </div>
-        {!openSideBar && (
-          <>
-            <div className="mb-5">
-              <h2 className="font-bold text-xl py-5 flex justify-between items-center w-[250px]">
-                Your Boards
-                <FormatListBulletedIcon />
-              </h2>
-              <div className="bg-gradient-to-r from-purple-700 to-purple-950/0 w-full h-[2px] rounded-full"></div>
-            </div>
-            <ul className="text-lg space-y-4 overflow-y-auto h-full">
-              {workSpacesSorted.map((i) => (
-                <motion.li
-                  initial={{ x: -80, opacity: 0 }}
-                  animate={{ x: 0, opacity: 1 }}
-                  transition={{
-                    duration: 0.1,
-                    damping: 50,
-                  }}
-                  key={i.id}
-                  style={{
-                    borderLeft: i.id === workSpaceId ? "solid 2px #9333ea" : "",
-                    background: i.id === workSpaceId ? "#3f3f3fc2" : "",
-                  }}
-                  className="p-2 cursor-pointer transition-all duration-200 rounded-r-md hover:bg-white/30"
-                >
-                  <div className="flex items-center">
-                    {i.id !== nameWorkSpace.id ? (
-                      <h2
-                        className="flex-1"
-                        onClick={() => handleSelectWorkSpace(i.id)}
-                      >
-                        {i.title.toUpperCase()}
-                      </h2>
-                    ) : (
-                      <input
-                        ref={inputBoard}
-                        onChange={(e: any) =>
-                          handleChnageWorkSpaceTitle(e, i.id)
-                        }
-                        onKeyDown={updateWorkSpace}
-                        type="text"
-                        className="bg-white/10 text-white rounded-md py-2 px-3 mr-2 w-5/6"
-                      />
-                    )}
-                    <span onClick={() => handleToggleFovrite(i.id)}>
-                      {!i.isFovrite ? <StarOutlineIcon /> : <StarIcon />}
-                    </span>
-                    <span>
-                      <EditIcon onClick={() => handleEditWorkSpace(i.id)} />
-                    </span>
-                    <span>
-                      <DeleteIcon onClick={() => handleDelete(i.id)} />
-                    </span>
-                  </div>
-                </motion.li>
-              ))}
-              {show && (
-                <li className="p-2 cursor-pointer transition-all duration-200 rounded-r-md w-full">
-                  <div className="flex">
-                    <input
-                      ref={inputBoard}
-                      value={nameWorkSpace.title}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          handlerCreateWorkSpace();
-                        }
-                      }}
-                      onChange={(e: any) => handleChnageWorkSpaceTitle(e, "")}
-                      placeholder="Board Name"
-                      type="text"
-                      className="bg-white/10 text-white rounded-md py-2 px-3 mr-2 w-5/6 placeholder:text-sm"
-                    />
-                    <span
-                      onClick={handlerCreateWorkSpace}
-                      className="active:bg-white/30 rounded-full w-fit px-2 flex items-center justify-center gap-3"
-                    >
-                      <CheckCircleIcon />
-                    </span>
-                    <span
-                      onClick={onCloseModal}
-                      className="active:bg-white/30 rounded-full w-fit px-2 flex items-center justify-center gap-3"
-                    >
-                      <CancelIcon />
-                    </span>
-                  </div>
-                </li>
-              )}
+        {collapsed ? (
+          <nav className="flex flex-1 flex-col items-center gap-2 overflow-y-auto py-3">
+            {toggle}
+            {sorted.map((workSpace) => (
               <button
-                onClick={onCloseModal}
-                className="text-center bg-black/50 rounded-full w-10 h-10 p-2 flex items-center justify-center active:bg-white my-5 mx-auto border-2 border-transparent hover:border-white transition-all duration-200"
+                key={workSpace.id}
+                type="button"
+                title={workSpace.title}
+                aria-label={`Open board ${workSpace.title}`}
+                aria-current={workSpace.id === activeId ? "page" : undefined}
+                onClick={() => dispatch(selectWorkSpace(workSpace.id))}
+                className={`flex h-9 w-9 items-center justify-center rounded-lg text-sm font-bold uppercase transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 ${
+                  workSpace.id === activeId
+                    ? "bg-purple-600 text-white"
+                    : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                }`}
               >
-                <AddIcon />
+                {workSpace.title.charAt(0)}
               </button>
-            </ul>
+            ))}
+            <button
+              type="button"
+              onClick={() => {
+                setCollapsed(false);
+                setIsCreating(true);
+              }}
+              className="icon-btn"
+              aria-label="New board"
+            >
+              <AddIcon fontSize="small" />
+            </button>
+          </nav>
+        ) : (
+          <>
+            <div className="flex items-center justify-between border-b border-zinc-800 py-3 pl-4 pr-2">
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">
+                Your boards
+              </h2>
+              {toggle}
+            </div>
+
+            <nav className="flex-1 overflow-y-auto p-2">
+              <ul className="space-y-1">
+                {sorted.map((workSpace) => {
+                  const isActive = workSpace.id === activeId;
+                  return (
+                    <li
+                      key={workSpace.id}
+                      className={`group flex items-center gap-0.5 rounded-md border-l-2 py-1 pl-2 pr-1 transition-colors ${
+                        isActive
+                          ? "border-purple-500 bg-white/10"
+                          : "border-transparent hover:bg-white/5"
+                      }`}
+                    >
+                      {renamingId === workSpace.id ? (
+                        <InlineInput
+                          initialValue={workSpace.title}
+                          ariaLabel="Board name"
+                          className="min-w-0 flex-1"
+                          onCommit={(title) => {
+                            dispatch(
+                              renameWorkSpace({ id: workSpace.id, title })
+                            );
+                            setRenamingId(null);
+                          }}
+                          onCancel={() => setRenamingId(null)}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            dispatch(selectWorkSpace(workSpace.id))
+                          }
+                          aria-current={isActive ? "page" : undefined}
+                          className="min-w-0 flex-1 truncate rounded py-1.5 text-left text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
+                        >
+                          {workSpace.title}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => dispatch(toggleFavorite(workSpace.id))}
+                        aria-pressed={workSpace.isFavorite}
+                        aria-label={
+                          workSpace.isFavorite
+                            ? `Remove ${workSpace.title} from favorites`
+                            : `Add ${workSpace.title} to favorites`
+                        }
+                        className={`icon-btn h-7 w-7 ${
+                          workSpace.isFavorite ? "text-amber-400" : ""
+                        }`}
+                      >
+                        {workSpace.isFavorite ? (
+                          <StarIcon fontSize="small" />
+                        ) : (
+                          <StarOutlineIcon fontSize="small" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRenamingId(workSpace.id)}
+                        aria-label={`Rename board ${workSpace.title}`}
+                        className={rowAction}
+                      >
+                        <EditIcon sx={{ fontSize: 16 }} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPendingDelete(workSpace)}
+                        aria-label={`Delete board ${workSpace.title}`}
+                        className={`${rowAction} hover:text-red-400`}
+                      >
+                        <DeleteIcon sx={{ fontSize: 16 }} />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+
+              {sorted.length === 0 && !isCreating && (
+                <p className="px-2 py-4 text-center text-sm text-zinc-500">
+                  You have no boards yet.
+                </p>
+              )}
+
+              {isCreating ? (
+                <div className="mt-2 space-y-1 px-1">
+                  <InlineInput
+                    ariaLabel="New board name"
+                    placeholder="Board name"
+                    onCommit={(title) => {
+                      dispatch(addWorkSpace(title));
+                      setIsCreating(false);
+                    }}
+                    onCancel={() => setIsCreating(false)}
+                  />
+                  <p className="text-xs text-zinc-500">
+                    Enter to create, Escape to cancel.
+                  </p>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setIsCreating(true)}
+                  className="mt-2 flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium text-zinc-300 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
+                >
+                  <AddIcon fontSize="small" />
+                  New board
+                </button>
+              )}
+            </nav>
           </>
         )}
-      </motion.aside>
+      </aside>
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title={`Delete "${pendingDelete?.title ?? ""}"?`}
+        message="The board with all of its columns and tasks will be permanently removed."
+        confirmLabel="Delete board"
+        destructive
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => {
+          if (pendingDelete) dispatch(deleteWorkSpace(pendingDelete.id));
+          setPendingDelete(null);
+        }}
+      />
     </>
   );
 }

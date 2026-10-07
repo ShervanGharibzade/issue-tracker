@@ -1,28 +1,20 @@
 "use client";
 
-import { useAppDispatch } from "@/redux/hooks";
-import EditIcon from "@mui/icons-material/Edit";
-import DeleteIcon from "@mui/icons-material/Delete";
-import { deleteTask, editTask } from "@/redux/slices/userSlice";
-import React, { useRef, useState } from "react";
-import { motion } from "framer-motion";
+import { memo, useEffect, useRef, useState } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import EidtTask from "./eidtTask";
+import { useAppDispatch } from "@/redux/hooks";
+import { deleteTask } from "@/redux/slices/userSlice";
+import ConfirmDialog from "@/components/ConfirmDialog";
+import EditTask from "./editTask";
+import TaskCard from "./taskCard";
+import type { Task as TaskType } from "@/types";
 
-export default function Task({ task, workId }: any) {
-  const [taskInfo, setTaskInfo] = useState({
-    description: "",
-    workSpaceId: "",
-    columnId: "",
-    assignment: "",
-    id: "",
-    status: "backLog",
-  });
-  const [iseditTask, setIsEditTask] = useState(false);
-  const [openEditTask, setOpenEditTask] = useState(false);
-
+function Task({ task }: { task: TaskType }) {
   const dispatch = useAppDispatch();
+  const [isEditing, setIsEditing] = useState(false);
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+
   const {
     setNodeRef,
     attributes,
@@ -30,103 +22,59 @@ export default function Task({ task, workId }: any) {
     transform,
     transition,
     isDragging,
-  } = useSortable({
-    id: task.id,
-    data: { type: "Task", task },
-  });
+  } = useSortable({ id: task.id, data: { type: "Task" } });
 
-  const style = {
-    transition,
-    transform: CSS.Transform.toString(transform),
-  };
-
-  function handlerOpenEditTaskModal() {
-    setOpenEditTask(!openEditTask);
-  }
-
-  function handlerOpenEditTask(id?: string) {
-    setTaskInfo((prev) => {
-      return { ...prev, id: id ? id : "" };
-    });
-    setIsEditTask(!iseditTask);
-  }
-
-  function handlerDeleteTask(id: string) {
-    dispatch(deleteTask(id));
-  }
-
-  if (isDragging)
-    return (
-      <div className="bg-white/10 opacity-40 max-w-[200px] grid gap-2  rounded-lg p-3 h-12 border-2 border-white.40" />
-    );
+  // A drag that ends over the card can still emit a click; ignore that one.
+  const justDragged = useRef(false);
+  useEffect(() => {
+    if (isDragging) {
+      justDragged.current = true;
+      return;
+    }
+    const timer = setTimeout(() => {
+      justDragged.current = false;
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [isDragging]);
 
   return (
     <>
       <div
         ref={setNodeRef}
-        style={style}
+        style={{ transform: CSS.Transform.toString(transform), transition }}
         {...attributes}
         {...listeners}
-        key={task.id}
-        id={task.id}
-        onClick={handlerOpenEditTaskModal}
-        className="bg-zinc-700/50 hover:bg-zinc-700 max-w-[300px] w-[200px] grid gap-2 h-fit px-3 py-2 items-center rounded-lg transition-all duration-200"
+        aria-label={`Task: ${task.description}. Press space to pick up and move.`}
+        onClick={() => {
+          if (!justDragged.current) setIsEditing(true);
+        }}
+        className={`touch-manipulation rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 ${
+          isDragging ? "opacity-30" : ""
+        }`}
       >
-        <motion.div
-          initial={{ y: -200, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{
-            duration: 0.1,
-            stiffness: 360,
-            damping: 50,
-          }}
-        >
-          <p className="flex gap-3 items-center justify-between break-words">
-            <h2 className="flex-1">{task?.description}</h2>
-            <div className="flex">
-              <span
-                onClick={() => handlerOpenEditTask(task.id)}
-                className="cursor-pointer active:bg-white/30 rounded-full p-1 flex items-center"
-              >
-                <EditIcon fontSize="small" />
-              </span>
-              <span
-                onClick={() => handlerDeleteTask(task.id)}
-                className="cursor-pointer active:bg-white/30 rounded-full p-1 flex items-center"
-              >
-                <DeleteIcon fontSize="small" />
-              </span>
-            </div>
-          </p>
-          <div className="flex gap-1">
-            {task?.assignment?.map(
-              (i: string, index: number) =>
-                index <= 3 && (
-                  <>
-                    <div key={i} className="relative">
-                      <div className="rounded-full w-7 h-7 font-bold flex items-center justify-center text-sm text-white bg-zinc-600">
-                        {i?.slice(0, 2)}
-                      </div>
-                    </div>
-                    {index >= 3 && (
-                      <div key={i} className="relative">
-                        <div className="rounded-full w-7 h-7 font-bold flex items-center justify-center text-sm text-white bg-zinc-600">
-                          {task.assignment.length - 4}+
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )
-            )}
-          </div>
-        </motion.div>
-      </div>
-      {openEditTask && (
-        <EidtTask
+        <TaskCard
           task={task}
-          handlerOpenEditTaskModal={handlerOpenEditTaskModal}
+          onEdit={() => setIsEditing(true)}
+          onDelete={() => setIsConfirmingDelete(true)}
         />
-      )}
+      </div>
+
+      {/* Rendered outside the draggable element so dialog events never reach dnd-kit. */}
+      {isEditing && <EditTask task={task} onClose={() => setIsEditing(false)} />}
+      <ConfirmDialog
+        open={isConfirmingDelete}
+        title="Delete task?"
+        message="This task will be permanently removed."
+        confirmLabel="Delete"
+        destructive
+        onCancel={() => setIsConfirmingDelete(false)}
+        onConfirm={() => {
+          setIsConfirmingDelete(false);
+          dispatch(deleteTask(task.id));
+        }}
+      />
     </>
   );
 }
+
+export default memo(Task);

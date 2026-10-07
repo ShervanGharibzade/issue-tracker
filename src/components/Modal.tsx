@@ -1,53 +1,131 @@
-import { create } from "domain";
-import React from "react";
+"use client";
 
+import { useEffect, useId, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import CloseIcon from "@mui/icons-material/Close";
+
+interface ModalProps {
+  open: boolean;
+  title: ReactNode;
+  onClose: () => void;
+  children: ReactNode;
+  footer?: ReactNode;
+  size?: "sm" | "md" | "lg";
+}
+
+const FOCUSABLE =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+const widths = { sm: "max-w-sm", md: "max-w-lg", lg: "max-w-2xl" } as const;
+
+/**
+ * Accessible dialog: portal, focus trap, Escape / backdrop to close,
+ * scroll lock and focus restoration. Mark an element with `data-autofocus`
+ * to choose which control receives focus first.
+ */
 export default function Modal({
-  createTitle,
-  createBody,
-  createActions,
-  width,
+  open,
+  title,
   onClose,
-  show,
-}: any) {
-  return (
-    <>
-      {show && (
-        <div className="bg-zinc-700/50 w-full h-screen absolute top-0 left-0 flex items-center justify-center z-10">
-          <div
-            style={{ width: width ? width : "fit-content" }}
-            className="bg-zinc-950 p-10 rounded-md space-y-5  relative"
+  children,
+  footer,
+  size = "md",
+}: ModalProps) {
+  const titleId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
+
+  useEffect(() => {
+    if (!open) return;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const initial =
+      dialog.querySelector<HTMLElement>("[data-autofocus]") ??
+      dialog.querySelector<HTMLElement>(FOCUSABLE) ??
+      dialog;
+    initial.focus();
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab" || !dialog) return;
+
+      const items = Array.from(
+        dialog.querySelectorAll<HTMLElement>(FOCUSABLE)
+      );
+      if (items.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previouslyFocused?.focus?.();
+    };
+  }, [open]);
+
+  if (!open || typeof document === "undefined") return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className={`flex max-h-[90dvh] w-full ${widths[size]} flex-col rounded-xl border border-zinc-800 bg-zinc-900 shadow-2xl shadow-purple-900/20 focus:outline-none`}
+      >
+        <div className="flex items-center justify-between gap-4 border-b border-zinc-800 px-6 py-4">
+          <h2 id={titleId} className="text-lg font-semibold text-white">
+            {title}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="icon-btn"
+            aria-label="Close dialog"
           >
-            <div className="">
-              {createTitle}
-              <button
-                onClick={onClose}
-                type="button"
-                className="end-2.5 text-gray-400 bg-transparent hover:bg-gray-200 hover:text-gray-900 rounded-lg text-sm w-8 h-8 ms-auto inline-flex justify-center items-center dark:hover:bg-gray-600  dark:hover:text-white absolute top-2 right-2"
-                data-modal-hide="authentication-modal"
-              >
-                <svg
-                  className="w-3 h-3"
-                  aria-hidden="true"
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 14 14"
-                >
-                  <path
-                    stroke="currentColor"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    d="m1 1 6 6m0 0 6 6M7 7l6-6M7 7l-6 6"
-                  />
-                </svg>
-                <span className="sr-only">Close modal</span>
-              </button>
-            </div>
-            <div>{createBody}</div>
-            <div>{createActions}</div>
-          </div>
+            <CloseIcon fontSize="small" />
+          </button>
         </div>
-      )}
-    </>
+        <div className="flex-1 overflow-y-auto px-6 py-5">{children}</div>
+        {footer && (
+          <div className="flex items-center justify-end gap-3 border-t border-zinc-800 px-6 py-4">
+            {footer}
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body
   );
 }
